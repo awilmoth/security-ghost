@@ -23,13 +23,13 @@ References:
 import argparse
 import logging
 import sys
-
-# from security_ghost import __version__
+from lib.library import am_i_online
+from security_ghost import __version__
 
 __author__ = "Aaron Wilmoth"
 __copyright__ = "Aaron Wilmoth"
 __license__ = "MIT"
-__version__ = "0.1.0"
+# __version__ = "0.1.0"
 
 _logger = logging.getLogger(__name__)
 
@@ -82,17 +82,19 @@ def parse_args(args):
     )
     parser.add_argument(
         "--socks",
+        required=True,
         dest="socks_config",
         help="socks proxy config file path",
         type=str,
-        metavar="SOCKS_PATH"
+        metavar="SOCKS_PATH",
     )
     parser.add_argument(
         "--vpn",
+        required=True,
         dest="vpn_config",
         help="VPN config file path",
         type=str,
-        metavar="VPN_PATH"
+        metavar="VPN_PATH",
     )
     parser.add_argument(
         "-v",
@@ -138,9 +140,12 @@ def main(args):
     args = parse_args(args)
     print(args)
     setup_logging(args.loglevel)
-    _logger.debug("Starting crazy calculations...")
-    print(f"The {args.n}-th Fibonacci number is {fib(args.n)}")
-    _logger.info("Script ends here")
+    # _logger.debug("Starting crazy calculations...")
+    # print(f"The {args.n}-th Fibonacci number is {fib(args.n)}")
+    # _logger.info("Script ends here")
+    print(am_i_online())
+    if am_i_online():
+        _logger.info("*You are online*")
 
 
 def run():
@@ -160,8 +165,8 @@ if __name__ == "__main__":
     # After installing your project with pip, users can also run your Python
     # modules as scripts via the ``-m`` flag, as defined in PEP 338::
     #
-    #     python -m security_ghost.skeleton --socks socks.conf --vpn wireguard.conf --dns cloudflare
+    #     python -m security_ghost.skeleton --socks socks.conf --vpn wireguard.conf
     #
     run()
-    print(sys.argv)
+    # print(sys.argv)
     # security-ghost --socks socks.conf --vpn wireguard.conf --dns cloudflare
