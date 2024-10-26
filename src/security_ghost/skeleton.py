@@ -23,7 +23,7 @@ References:
 import argparse
 import logging
 import sys
-from lib.library import am_i_online
+from lib.library import am_i_online, get_current_mac, change_mac_linux, get_random_mac
 from security_ghost import __version__
 
 __author__ = "Aaron Wilmoth"
@@ -146,6 +146,15 @@ def main(args):
     print(am_i_online())
     if am_i_online():
         _logger.info("*You are online*")
+    current_mac = get_current_mac("en0")
+    print("[+] Current Mac :" + current_mac)
+    change_mac_linux("en0", "000E04DB5F02")
+    current_mac = get_current_mac("en0")
+
+    if current_mac == get_random_mac():
+        print("[+] Mac address was successfully changed to  :" + current_mac)
+    else:
+        print("[-] Mac address did not get changed .")
 
 
 def run():
