@@ -3,6 +3,18 @@ import os
 import random
 import re
 import subprocess
+from requests.structures import CaseInsensitiveDict
+from http.client import HTTPConnection
+from urllib.parse import urlparse
+from decouple import config
+import socks
+
+# Extracting SOCKS proxy variables from environment using decouple
+SOCKS_TYPE = config("SOCKS_TYPE")
+SOCKS_HOST = config("SOCKS_HOST")
+SOCKS_PORT = config("SOCKS_PORT", cast=int)
+SOCKS_USERNAME = config("SOCKS_USERNAME")
+SOCKS_PASSWORD = config("SOCKS_PASSWORD")
 
 
 def am_i_online(url="https://dns.google"):
@@ -105,10 +117,59 @@ def change_mac_linux(interface, new_mac):
         print(f"[-] Failed to change MAC address: {e}")
 
 
+class TunneledHTTPConnection(HTTPConnection):
+    def __init__(self, transport, *args, **kwargs):
+        self.transport = transport
+        HTTPConnection.__init__(self, *args, **kwargs)
+
+    def connect(self):
+        self.transport.connect((self.host, self.port))
+        self.sock = self.transport
+
+
+class TunneledHTTPAdapter(requests.adapters.BaseAdapter):
+    def __init__(self, transport):
+        self.transport = transport
+
+    def close(self):
+        pass
+
+    def send(self, request, **kwargs):
+        scheme, location, path, params, query, anchor = urlparse(request.url)
+        if ":" in location:
+            host, port = location.split(":")
+            port = int(port)
+        else:
+            host = location
+            port = 80
+
+        connection = TunneledHTTPConnection(self.transport, host, port)
+        connection.request(
+            method=request.method,
+            url=request.url,
+            body=request.body,
+            headers=request.headers,
+        )
+        r = connection.getresponse()
+        resp = requests.Response()
+        resp.status_code = r.status
+        resp.headers = CaseInsensitiveDict(r.headers)
+        resp.raw = r
+        resp.reason = r.reason
+        resp.url = request.url
+        resp.request = request
+        resp.connection = connection
+        resp.encoding = requests.utils.get_encoding_from_headers(r.headers)
+        requests.cookies.extract_cookies_to_jar(resp.cookies, request, r)
+        return resp
+
+
 if __name__ == "__main__":
     online_status = am_i_online()
     print(f"Online status: {online_status}")
-
+    print(
+        f"SOCKS proxy type: {SOCKS_TYPE}, SOCKS host: {SOCKS_HOST}, SOCKS port: {SOCKS_PORT}"
+    )
     if not online_status:
         print("[-] Network is unreachable. Please check your network connection.")
     else:
@@ -123,5 +184,25 @@ if __name__ == "__main__":
                 updated_mac = get_current_mac(interface)
                 if updated_mac:
                     print(f"Updated MAC address of {interface}: {updated_mac}")
+                    # starting proxychains for socks proxy
+                    with requests.Session() as session:
+                        sock = socks.socksocket()
+                        # Proxy setup using environment variables
+                        proxy_type = getattr(
+                            socks, SOCKS_TYPE
+                        )  # Get the actual socks proxy type
+                        sock.addproxy(
+                            socks.Proxy(
+                                proxy_type,  # SOCKS type from the environment variable
+                                SOCKS_HOST,  # Host from the environment variable
+                                SOCKS_PORT,  # Port from the environment variable
+                                remote_dns=False,
+                                username=SOCKS_USERNAME,  # Username from the environment variable
+                                password=SOCKS_PASSWORD,  # Password from the environment variable
+                            )
+                        )
+                        session.mount("http://", TunneledHTTPAdapter(sock))
+                        session.mount("https://", TunneledHTTPAdapter(sock))
+                        print(session.get("https://httpbin.org/ip").json()["origin"])
         else:
             print("[-] Could not generate MAC address.")
