@@ -19,7 +19,7 @@ SOCKS_PASSWORD = config("SOCKS_PASSWORD")
 
 def am_i_online(url="https://dns.google"):
     """
-    Check if the system is online by making a GET request to a given URL.
+    Check if the system is online by making a GET request to a specified URL.
 
     Parameters:
     url (str): The URL to check connectivity against. Defaults to 'https://dns.google'.
@@ -223,15 +223,13 @@ if __name__ == "__main__":
                         proxy_type = getattr(
                             socks, SOCKS_TYPE
                         )  # Get the actual socks proxy type
-                        sock.addproxy(
-                            socks.Proxy(
-                                proxy_type,  # SOCKS type from the environment variable
-                                SOCKS_HOST,  # Host from the environment variable
-                                SOCKS_PORT,  # Port from the environment variable
-                                remote_dns=False,
-                                username=SOCKS_USERNAME,  # Username from the environment variable
-                                password=SOCKS_PASSWORD,  # Password from the environment variable
-                            )
+                        sock.setproxy(
+                            proxy_type,  # SOCKS type from the environment variable
+                            SOCKS_HOST,  # Host from the environment variable
+                            SOCKS_PORT,  # Port from the environment variable
+                            True,  # remote_dns param is moved here as per the setproxy signature
+                            SOCKS_USERNAME,  # Username from the environment variable
+                            SOCKS_PASSWORD,  # Password from the environment variable
                         )
                         session.mount("http://", TunneledHTTPAdapter(sock))
                         session.mount("https://", TunneledHTTPAdapter(sock))
