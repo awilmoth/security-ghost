@@ -118,23 +118,57 @@ def change_mac_linux(interface, new_mac):
 
 
 class TunneledHTTPConnection(HTTPConnection):
+    """
+    Custom HTTP connection class that uses a specified transport (proxy).
+
+    This class overrides the default HTTPConnection to connect through a provided proxy transport.
+
+    Attributes:
+    transport (socks.socksocket): The proxy socket through which connections are tunneled.
+    """
+
     def __init__(self, transport, *args, **kwargs):
         self.transport = transport
         HTTPConnection.__init__(self, *args, **kwargs)
 
     def connect(self):
+        """
+        Establish a connection through the proxy transport.
+        """
         self.transport.connect((self.host, self.port))
         self.sock = self.transport
 
 
 class TunneledHTTPAdapter(requests.adapters.BaseAdapter):
+    """
+    Custom HTTP adapter for tunneling HTTP requests through a specified proxy.
+
+    This adapter mounts an HTTP Connection using a proxy transport.
+
+    Attributes:
+    transport (socks.socksocket): The proxy socket through which requests are tunneled.
+    """
+
     def __init__(self, transport):
         self.transport = transport
 
     def close(self):
+        """
+        Close the adapter and ensure any resources are released.
+        """
         pass
 
     def send(self, request, **kwargs):
+        """
+        Send the request through the proxy transport and return the response.
+
+        Parameters:
+        request (requests.PreparedRequest): The prepared request to be sent.
+        kwargs: Additional arguments passed to the send method.
+
+        Returns:
+        requests.Response: The response received from the request.
+        """
         scheme, location, path, params, query, anchor = urlparse(request.url)
         if ":" in location:
             host, port = location.split(":")
@@ -167,9 +201,7 @@ class TunneledHTTPAdapter(requests.adapters.BaseAdapter):
 if __name__ == "__main__":
     online_status = am_i_online()
     print(f"Online status: {online_status}")
-    print(
-        f"SOCKS proxy type: {SOCKS_TYPE}, SOCKS host: {SOCKS_HOST}, SOCKS port: {SOCKS_PORT}"
-    )
+
     if not online_status:
         print("[-] Network is unreachable. Please check your network connection.")
     else:
