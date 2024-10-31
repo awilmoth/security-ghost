@@ -17,7 +17,9 @@ PySocks==1.7.1
 pytest==8.3.3
 python-decouple==3.8
 python-dotenv==1.0.1
+python-wireguard==0.2.2
 requests==2.32.3
+-e git+ssh://git@github.com/awilmoth/security-ghost.git@1d642df777534f43e3cfbef55b5203c38e8a1cca#egg=security_ghost
 setuptools==75.2.0
 setuptools-scm==8.1.0
 tomlkit==0.13.2

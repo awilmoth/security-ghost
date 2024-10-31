@@ -8,6 +8,9 @@ from http.client import HTTPConnection
 from urllib.parse import urlparse
 from decouple import config
 import socks
+from python_wireguard import Key, Client, ServerConnection
+import configparser
+
 
 # Extracting SOCKS proxy variables from environment using decouple
 SOCKS_TYPE = config("SOCKS_TYPE")
@@ -198,6 +201,51 @@ class TunneledHTTPAdapter(requests.adapters.BaseAdapter):
         return resp
 
 
+def parse_wireguard_conf(file_path):
+    """
+    Parse a WireGuard configuration (.conf) file and extract its information.
+
+    Parameters:
+    file_path (str): The path to the WireGuard configuration file.
+
+    Returns:
+    dict: A dictionary with the configuration details.
+    """
+    parser = configparser.ConfigParser(allow_no_value=True)
+    parser.read(file_path)
+
+    # Convert the ConfigParser object to a dictionary
+    conf_dict = {}
+    for section in parser.sections():
+        conf_dict[section] = {}
+        for key, value in parser.items(section):
+            conf_dict[section][key] = value
+
+    return conf_dict
+
+
+def unpack_wireguard_config(config):
+    # Unpacking the dictionary
+    interface_private_key = config["Interface"]["privatekey"]
+    interface_address = config["Interface"]["address"]
+    interface_dns = config["Interface"]["dns"]
+    peer_public_key = config["Peer"]["publickey"]
+    peer_allowed_ips = config["Peer"]["allowedips"]
+    peer_endpoint = config["Peer"]["endpoint"]
+    peer_preshared_key = config["Peer"]["presharedkey"]
+
+    # Returning the unpacked variables
+    return (
+        interface_private_key,
+        interface_address,
+        interface_dns,
+        peer_public_key,
+        peer_allowed_ips,
+        peer_endpoint,
+        peer_preshared_key,
+    )
+
+
 if __name__ == "__main__":
     online_status = am_i_online()
     print(f"Online status: {online_status}")
@@ -234,5 +282,45 @@ if __name__ == "__main__":
                         session.mount("http://", TunneledHTTPAdapter(sock))
                         session.mount("https://", TunneledHTTPAdapter(sock))
                         print(session.get("https://httpbin.org/ip").json()["origin"])
+
+                        file_path = "/root/Windscribe-Bend-OregonTrail.conf"
+                        config_data = parse_wireguard_conf(file_path)
+                        (
+                            interface_private_key,
+                            interface_address,
+                            interface_dns,
+                            peer_public_key,
+                            peer_allowed_ips,
+                            peer_endpoint,
+                            peer_preshared_key,
+                        ) = unpack_wireguard_config(config_data)
+                        client_name = "wg-client"
+                        local_ip = interface_address.split("/")[0]
+                        try:
+                            client_private_key = Key(interface_private_key)
+                            peer_public_key = Key(peer_public_key)
+                            peer_preshared_key = Key(peer_preshared_key)
+
+                            client = Client(client_name, client_private_key, local_ip)
+
+                            endpoint = peer_endpoint.split(":")[0]
+                            port = int(peer_endpoint.split(":")[1])
+
+                            server_conn = ServerConnection(
+                                peer_public_key,
+                                endpoint,
+                                port,
+                            )
+
+                            client.set_server(server_conn)
+                            client.connect()
+
+                            print("WireGuard client connected successfully.")
+
+                        except ValueError as e:
+                            print(f"Error: {e}")
+                        except Exception as e:
+                            print(f"Unexpected error: {e}")
+
         else:
             print("[-] Could not generate MAC address.")
