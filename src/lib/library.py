@@ -20,6 +20,48 @@ SOCKS_USERNAME = config("SOCKS_USERNAME")
 SOCKS_PASSWORD = config("SOCKS_PASSWORD")
 
 
+def run_shell_command(command):
+    """
+    Function to run shell commands and handle errors.
+    """
+    try:
+        subprocess.check_call(command, shell=True)
+    except subprocess.CalledProcessError as e:
+        print(f"[-] Command failed: {command}\nError: {e}")
+
+
+def setup_wireguard_interface():
+    """
+    Setup WireGuard interface wg0 and configure routing.
+    """
+    commands = [
+        "ip link add wg0 type wireguard",
+        "wg setconf wg0 /root/wireguard.conf",  # Update with correct path
+        "ip -4 address add 10.10.10.2/24 dev wg0",
+        "ip link set mtu 1420 up dev wg0",
+        "wg set wg0 fwmark 51820",
+        "ip -4 route add 0.0.0.0/0 dev wg0 table 51820",
+        "ip -4 rule add not fwmark 51820 table 51820",
+    ]
+
+    for command in commands:
+        run_shell_command(command)
+
+
+def route_ssh_via_eth0():
+    """
+    Ensure SSH traffic (port 22) uses the eth0 interface.
+    """
+    commands = [
+        "iptables -t mangle -A OUTPUT -p tcp --sport 22 -o eth0 -j MARK --set-mark 0x1",
+        "ip rule add fwmark 0x1 lookup 100",
+        "ip route add default via $(ip route get 8.8.8.8 | head -1 | cut -d' ' -f3) dev eth0 table 100",
+    ]
+
+    for command in commands:
+        run_shell_command(command)
+
+
 def am_i_online(url="https://dns.google"):
     """
     Check if the system is online by making a GET request to a specified URL.
@@ -232,7 +274,7 @@ def unpack_wireguard_config(config):
     peer_public_key = config["Peer"]["publickey"]
     peer_allowed_ips = config["Peer"]["allowedips"]
     peer_endpoint = config["Peer"]["endpoint"]
-    peer_preshared_key = config["Peer"]["presharedkey"]
+    # peer_preshared_key = config["Peer"]["presharedkey"]
 
     # Returning the unpacked variables
     return (
@@ -242,7 +284,7 @@ def unpack_wireguard_config(config):
         peer_public_key,
         peer_allowed_ips,
         peer_endpoint,
-        peer_preshared_key,
+        # peer_preshared_key,
     )
 
 
@@ -283,7 +325,7 @@ if __name__ == "__main__":
                         session.mount("https://", TunneledHTTPAdapter(sock))
                         print(session.get("https://httpbin.org/ip").json()["origin"])
 
-                        file_path = "/root/Windscribe-Bend-OregonTrail.conf"
+                        file_path = "/root/wireguard.conf"
                         config_data = parse_wireguard_conf(file_path)
                         (
                             interface_private_key,
@@ -292,14 +334,14 @@ if __name__ == "__main__":
                             peer_public_key,
                             peer_allowed_ips,
                             peer_endpoint,
-                            peer_preshared_key,
+                            # peer_preshared_key,
                         ) = unpack_wireguard_config(config_data)
-                        client_name = "wg-client"
+                        client_name = "wg0"
                         local_ip = interface_address.split("/")[0]
                         try:
                             client_private_key = Key(interface_private_key)
                             peer_public_key = Key(peer_public_key)
-                            peer_preshared_key = Key(peer_preshared_key)
+                            # peer_preshared_key = Key(peer_preshared_key)
 
                             client = Client(client_name, client_private_key, local_ip)
 
@@ -316,6 +358,10 @@ if __name__ == "__main__":
                             client.connect()
 
                             print("WireGuard client connected successfully.")
+                            # Setup wg0 interface
+                            setup_wireguard_interface()
+                            # Route SSH traffic via eth0
+                            route_ssh_via_eth0()
 
                         except ValueError as e:
                             print(f"Error: {e}")
