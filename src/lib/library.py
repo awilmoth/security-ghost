@@ -64,7 +64,7 @@ def setup_wireguard_interface():
     """
     commands = [
         # "sudo ip link add wg0 type wireguard",
-        "sudo wg setconf wg0 /root/wireguard.conf",  # Update with correct path
+        # "sudo wg setconf wg0 /root/wireguard.conf",  # Update with correct path
         "sudo ip -4 address add 10.10.10.2/24 dev wg0",
         "sudo ip link set mtu 1420 up dev wg0",
         "sudo wg set wg0 fwmark 51820",
@@ -77,12 +77,12 @@ def setup_wireguard_interface():
         run_shell_command(command)
 
 
-def add_ssh_route():
+def add_ssh_route(primary_network_interface):
     """
     Add a specific route for SSH traffic to ensure it doesn't route through WireGuard.
     """
     try:
-        # Get the default gateway IP associated with eth0
+        # Get the default gateway IP associated with primary network interface
         gateway_ip = subprocess.check_output(
             "ip route show default | awk '/default/ {print $3}'", shell=True, text=True
         ).strip()
@@ -92,7 +92,7 @@ def add_ssh_route():
         # Create ip rule and ip route for the SSH traffic
         commands = [
             "sudo ip rule add fwmark 0x1 table 100",
-            f"sudo ip route add default via {gateway_ip} dev eth0 table 100",
+            f"sudo ip route add default via {gateway_ip} dev {primary_network_interface} table 100",
         ]
 
         for command in commands:
@@ -103,9 +103,9 @@ def add_ssh_route():
         print(f"[-] Failed to add IP rule/route: {e}")
 
 
-def route_ssh_via_eth0():
+def route_ssh_via_primary_network_interface(primary_network_interface):
     """
-    Ensure SSH traffic (port 22) uses the eth0 interface.
+    Ensure SSH traffic (port 22) uses the primary network interface interface.
     """
     commands = [
         "sudo iptables -t mangle -A OUTPUT -p tcp --sport 22 -j MARK --set-mark 0x1",
@@ -116,7 +116,7 @@ def route_ssh_via_eth0():
         run_shell_command(command)
 
     # Add specific routing rules for SSH
-    add_ssh_route()
+    add_ssh_route(primary_network_interface)
 
 
 def am_i_online(url="https://dns.google"):
@@ -172,7 +172,7 @@ def get_current_mac(interface):
     Get the current MAC address of a specified network interface.
 
     Parameters:
-    interface (str): The name of the network interface, e.g., 'eth0'.
+    interface (str): The name of the network interface, e.g., 'primary network interface'.
 
     Returns:
     str: The current MAC address of the specified network interface, or False if no MAC address is found.
@@ -199,7 +199,7 @@ def change_mac_linux(interface, new_mac):
     Change the MAC address of a specified network interface on Linux.
 
     Parameters:
-    interface (str): The name of the network interface, e.g., 'eth0'.
+    interface (str): The name of the network interface, e.g., 'primary network interface'.
     new_mac (str): The new MAC address to assign to the interface.
 
     Returns:
@@ -446,9 +446,11 @@ if __name__ == "__main__":
                                 setup_wireguard_interface()
                                 print("Wireguard interface set up successfully")
 
-                                # Route SSH traffic via eth0
-                                route_ssh_via_eth0()
-                                print("[+] SSH traffic is being routed via eth0.")
+                                # Route SSH traffic via primary network interface
+                                route_ssh_via_primary_network_interface(interface)
+                                print(
+                                    "[+] SSH traffic is being routed via primary network interface."
+                                )
 
                             else:
                                 print("[-] Please install WireGuard to proceed.")
