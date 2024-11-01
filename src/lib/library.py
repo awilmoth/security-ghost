@@ -63,8 +63,6 @@ def setup_wireguard_interface():
     Setup WireGuard interface wg0 and configure routing.
     """
     commands = [
-        # "sudo ip link add wg0 type wireguard",
-        # "sudo wg setconf wg0 /root/wireguard.conf",  # Update with correct path
         "sudo ip -4 address add 10.10.10.2/24 dev wg0",
         "sudo ip link set mtu 1420 up dev wg0",
         "sudo wg set wg0 fwmark 51820",
@@ -199,7 +197,7 @@ def change_mac_linux(interface, new_mac):
     Change the MAC address of a specified network interface on Linux.
 
     Parameters:
-    interface (str): The name of the network interface, e.g., 'primary network interface'.
+    interface (str): The name of the network interface
     new_mac (str): The new MAC address to assign to the interface.
 
     Returns:
@@ -326,7 +324,7 @@ def parse_wireguard_conf(file_path):
 def unpack_wireguard_config(config):
     # Unpacking the dictionary
     interface_private_key = config["Interface"]["privatekey"]
-    # interface_address = config["Interface"]["address"]
+    interface_address = config["Interface"]["address"]
     # interface_dns = config["Interface"]["dns"]
     peer_public_key = config["Peer"]["publickey"]
     peer_allowed_ips = config["Peer"]["allowedips"]
@@ -336,7 +334,7 @@ def unpack_wireguard_config(config):
     # Returning the unpacked variables
     return (
         interface_private_key,
-        # interface_address,
+        interface_address,
         # interface_dns,
         peer_public_key,
         peer_allowed_ips,
@@ -408,7 +406,7 @@ if __name__ == "__main__":
                         config_data = parse_wireguard_conf(file_path)
                         (
                             interface_private_key,
-                            # interface_address,
+                            interface_address,
                             # interface_dns,
                             peer_public_key,
                             peer_allowed_ips,
@@ -416,7 +414,7 @@ if __name__ == "__main__":
                             # peer_preshared_key,
                         ) = unpack_wireguard_config(config_data)
                         client_name = "wg0"
-                        local_ip = "10.10.10.2/32"  # interface_address.split("/")[0]
+                        local_ip = interface_address.split("/")[0]
                         try:
                             client_private_key = Key(interface_private_key)
                             peer_public_key = Key(peer_public_key)
