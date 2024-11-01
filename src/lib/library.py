@@ -35,8 +35,8 @@ def setup_wireguard_interface():
     Setup WireGuard interface wg0 and configure routing.
     """
     commands = [
-        "ip link add wg0 type wireguard",
-        "wg setconf wg0 /root/wireguard.conf",  # Update with correct path
+        # "ip link add wg0 type wireguard",
+        # "wg setconf wg0 /root/wireguard.conf",  # Update with correct path
         "ip -4 address add 10.10.10.2/24 dev wg0",
         "ip link set mtu 1420 up dev wg0",
         "wg set wg0 fwmark 51820",
@@ -269,8 +269,8 @@ def parse_wireguard_conf(file_path):
 def unpack_wireguard_config(config):
     # Unpacking the dictionary
     interface_private_key = config["Interface"]["privatekey"]
-    interface_address = config["Interface"]["address"]
-    interface_dns = config["Interface"]["dns"]
+    # interface_address = config["Interface"]["address"]
+    # interface_dns = config["Interface"]["dns"]
     peer_public_key = config["Peer"]["publickey"]
     peer_allowed_ips = config["Peer"]["allowedips"]
     peer_endpoint = config["Peer"]["endpoint"]
@@ -279,13 +279,33 @@ def unpack_wireguard_config(config):
     # Returning the unpacked variables
     return (
         interface_private_key,
-        interface_address,
-        interface_dns,
+        # interface_address,
+        # interface_dns,
         peer_public_key,
         peer_allowed_ips,
         peer_endpoint,
         # peer_preshared_key,
     )
+
+
+def get_primary_network_interface():
+    """
+    Function to get the name of the primary network interface.
+    On modern systems, 'ip route show' can be used to find the default gateway interface.
+    """
+    try:
+        # Execute the command and get the output
+        output = subprocess.check_output("ip route show default", shell=True, text=True)
+        # Parse the output to find the primary interface
+        for line in output.splitlines():
+            if "default via" in line:
+                parts = line.split()
+                if "dev" in parts:
+                    interface = parts[parts.index("dev") + 1]
+                    return interface
+    except subprocess.CalledProcessError as e:
+        print(f"[-] Command failed: {e}")
+        return None
 
 
 if __name__ == "__main__":
@@ -298,7 +318,7 @@ if __name__ == "__main__":
         new_mac = get_random_mac()
         if new_mac:
             print(f"Generated Random MAC: {new_mac}")
-            interface = "eth0"
+            interface = get_primary_network_interface()
             current_mac = get_current_mac(interface)
             if current_mac:
                 print(f"Current MAC address of {interface}: {current_mac}")
@@ -329,15 +349,15 @@ if __name__ == "__main__":
                         config_data = parse_wireguard_conf(file_path)
                         (
                             interface_private_key,
-                            interface_address,
-                            interface_dns,
+                            # interface_address,
+                            # interface_dns,
                             peer_public_key,
                             peer_allowed_ips,
                             peer_endpoint,
                             # peer_preshared_key,
                         ) = unpack_wireguard_config(config_data)
                         client_name = "wg0"
-                        local_ip = interface_address.split("/")[0]
+                        local_ip = "10.10.10.2/32"  # interface_address.split("/")[0]
                         try:
                             client_private_key = Key(interface_private_key)
                             peer_public_key = Key(peer_public_key)
@@ -358,8 +378,11 @@ if __name__ == "__main__":
                             client.connect()
 
                             print("WireGuard client connected successfully.")
+
                             # Setup wg0 interface
                             setup_wireguard_interface()
+                            print("Wireguard interface set up successfully")
+
                             # Route SSH traffic via eth0
                             route_ssh_via_eth0()
 
