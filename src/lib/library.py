@@ -1,4 +1,3 @@
-import requests
 import os
 import random
 import re
@@ -10,6 +9,7 @@ from decouple import config
 import socks
 from python_wireguard import Key, Client, ServerConnection
 import configparser
+import requests
 
 
 # Extracting SOCKS proxy variables from environment using decouple
@@ -447,10 +447,9 @@ if __name__ == "__main__":
                                 print("Wireguard interface set up successfully")
 
                                 # Route SSH traffic via eth0
-                                if route_ssh_via_eth0():
-                                    print("[+] SSH traffic is being routed via eth0.")
-                                else:
-                                    print("[-] Failed to route SSH traffic via eth0.")
+                                route_ssh_via_eth0()
+                                print("[+] SSH traffic is being routed via eth0.")
+
                             else:
                                 print("[-] Please install WireGuard to proceed.")
 
