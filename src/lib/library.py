@@ -30,18 +30,46 @@ def run_shell_command(command):
         print(f"[-] Command failed: {command}\nError: {e}")
 
 
+def check_wireguard_installed():
+    """
+    Check if WireGuard is installed.
+    """
+    try:
+        output = subprocess.check_output(["which", "wg"], encoding="utf-8").strip()
+        if output:
+            print(f"[+] WireGuard is installed at {output}")
+            return True
+        else:
+            print("[-] WireGuard is not installed.")
+            return False
+    except subprocess.CalledProcessError:
+        print("[-] WireGuard is not installed.")
+        return False
+
+
+def load_wireguard_module():
+    """
+    Load the WireGuard kernel module.
+    """
+    try:
+        subprocess.check_call(["sudo", "modprobe", "wireguard"])
+        print("[+] WireGuard kernel module loaded successfully.")
+    except subprocess.CalledProcessError as e:
+        print(f"[-] Failed to load WireGuard kernel module: {e}")
+
+
 def setup_wireguard_interface():
     """
     Setup WireGuard interface wg0 and configure routing.
     """
     commands = [
-        # "ip link add wg0 type wireguard",
-        # "wg setconf wg0 /root/wireguard.conf",  # Update with correct path
-        "ip -4 address add 10.10.10.2/24 dev wg0",
-        "ip link set mtu 1420 up dev wg0",
-        "wg set wg0 fwmark 51820",
-        "ip -4 route add 0.0.0.0/0 dev wg0 table 51820",
-        "ip -4 rule add not fwmark 51820 table 51820",
+        "sudo ip link add wg0 type wireguard",
+        "sudo wg setconf wg0 /root/wireguard.conf",  # Update with correct path
+        "sudo ip -4 address add 10.10.10.2/24 dev wg0",
+        "sudo ip link set mtu 1420 up dev wg0",
+        "sudo wg set wg0 fwmark 51820",
+        "sudo ip -4 route add 0.0.0.0/0 dev wg0 table 51820",
+        "sudo ip -4 rule add not fwmark 51820 table 51820",
     ]
 
     for command in commands:
@@ -52,14 +80,23 @@ def route_ssh_via_eth0():
     """
     Ensure SSH traffic (port 22) uses the eth0 interface.
     """
-    commands = [
-        "iptables -t mangle -A OUTPUT -p tcp --sport 22 -o eth0 -j MARK --set-mark 0x1",
-        "ip rule add fwmark 0x1 lookup 100",
-        "ip route add default via $(ip route get 8.8.8.8 | head -1 | cut -d' ' -f3) dev eth0 table 100",
-    ]
+    try:
+        gateway_ip = subprocess.check_output(
+            "ip route get 8.8.8.8 | head -1 | cut -d' ' -f3", shell=True, text=True
+        ).strip()
 
-    for command in commands:
-        run_shell_command(command)
+        commands = [
+            "sudo iptables -t mangle -A OUTPUT -p tcp --sport 22 -o eth0 -j MARK --set-mark 0x1",
+            "sudo ip rule add fwmark 0x1 lookup 100",
+            f"sudo ip route add default via {gateway_ip} dev eth0 table 100",
+        ]
+
+        for command in commands:
+            run_shell_command(command)
+    except subprocess.CalledProcessError as e:
+        print(f"[-] Command failed: {e}")
+        return False  # Optionally, you can return False to indicate failure
+    return True  # Indicate success
 
 
 def am_i_online(url="https://dns.google"):
@@ -343,7 +380,9 @@ if __name__ == "__main__":
                         )
                         session.mount("http://", TunneledHTTPAdapter(sock))
                         session.mount("https://", TunneledHTTPAdapter(sock))
-                        print(session.get("https://httpbin.org/ip").json()["origin"])
+                        print(
+                            f"SOCKS proxy connected to server at: {session.get('https://httpbin.org/ip').json()['origin']}"
+                        )
 
                         file_path = "/root/wireguard.conf"
                         config_data = parse_wireguard_conf(file_path)
@@ -379,12 +418,18 @@ if __name__ == "__main__":
 
                             print("WireGuard client connected successfully.")
 
-                            # Setup wg0 interface
-                            setup_wireguard_interface()
-                            print("Wireguard interface set up successfully")
+                            # Check if WireGuard is installed and load the module
+                            if check_wireguard_installed():
+                                load_wireguard_module()
 
-                            # Route SSH traffic via eth0
-                            route_ssh_via_eth0()
+                                # Setup wg0 interface
+                                setup_wireguard_interface()
+                                print("Wireguard interface set up successfully")
+
+                                # Route SSH traffic via eth0
+                                route_ssh_via_eth0()
+                            else:
+                                print("[-] Please install WireGuard to proceed.")
 
                         except ValueError as e:
                             print(f"Error: {e}")
