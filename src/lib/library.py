@@ -63,40 +63,60 @@ def setup_wireguard_interface():
     Setup WireGuard interface wg0 and configure routing.
     """
     commands = [
-        "sudo ip link add wg0 type wireguard",
+        # "sudo ip link add wg0 type wireguard",
         "sudo wg setconf wg0 /root/wireguard.conf",  # Update with correct path
         "sudo ip -4 address add 10.10.10.2/24 dev wg0",
         "sudo ip link set mtu 1420 up dev wg0",
         "sudo wg set wg0 fwmark 51820",
         "sudo ip -4 route add 0.0.0.0/0 dev wg0 table 51820",
         "sudo ip -4 rule add not fwmark 51820 table 51820",
+        "sudo ip -4 rule add table main suppress_prefixlength 0",  # Add this line to fix routing issues
     ]
 
     for command in commands:
         run_shell_command(command)
 
 
-def route_ssh_via_eth0():
+def add_ssh_route():
     """
-    Ensure SSH traffic (port 22) uses the eth0 interface.
+    Add a specific route for SSH traffic to ensure it doesn't route through WireGuard.
     """
     try:
+        # Get the default gateway IP associated with eth0
         gateway_ip = subprocess.check_output(
-            "ip route get 8.8.8.8 | head -1 | cut -d' ' -f3", shell=True, text=True
+            "ip route show default | awk '/default/ {print $3}'", shell=True, text=True
         ).strip()
 
+        print(f"[+] Default gateway IP: {gateway_ip}")
+
+        # Create ip rule and ip route for the SSH traffic
         commands = [
-            "sudo iptables -t mangle -A OUTPUT -p tcp --sport 22 -o eth0 -j MARK --set-mark 0x1",
-            "sudo ip rule add fwmark 0x1 lookup 100",
+            "sudo ip rule add fwmark 0x1 table 100",
             f"sudo ip route add default via {gateway_ip} dev eth0 table 100",
         ]
 
         for command in commands:
             run_shell_command(command)
+
+        print("[+] Successfully added IP rule and route for SSH traffic.")
     except subprocess.CalledProcessError as e:
-        print(f"[-] Command failed: {e}")
-        return False  # Optionally, you can return False to indicate failure
-    return True  # Indicate success
+        print(f"[-] Failed to add IP rule/route: {e}")
+
+
+def route_ssh_via_eth0():
+    """
+    Ensure SSH traffic (port 22) uses the eth0 interface.
+    """
+    commands = [
+        "sudo iptables -t mangle -A OUTPUT -p tcp --sport 22 -j MARK --set-mark 0x1",
+        "sudo iptables -t mangle -A OUTPUT -p tcp --dport 22 -j MARK --set-mark 0x1",
+    ]
+
+    for command in commands:
+        run_shell_command(command)
+
+    # Add specific routing rules for SSH
+    add_ssh_route()
 
 
 def am_i_online(url="https://dns.google"):
@@ -427,7 +447,10 @@ if __name__ == "__main__":
                                 print("Wireguard interface set up successfully")
 
                                 # Route SSH traffic via eth0
-                                route_ssh_via_eth0()
+                                if route_ssh_via_eth0():
+                                    print("[+] SSH traffic is being routed via eth0.")
+                                else:
+                                    print("[-] Failed to route SSH traffic via eth0.")
                             else:
                                 print("[-] Please install WireGuard to proceed.")
 
