@@ -4,7 +4,20 @@ import sys
 import requests
 import socks
 from python_wireguard import Key, Client, ServerConnection
-from lib.library import am_i_online, get_current_mac, change_mac_linux, get_random_mac, get_primary_network_interface, setup_wireguard_interface, parse_wireguard_conf, route_ssh_via_primary_network_interface, unpack_wireguard_config, check_wireguard_installed, load_wireguard_module, parse_socks_config
+from lib.library import (
+    am_i_online,
+    get_current_mac,
+    change_mac_linux,
+    get_random_mac,
+    get_primary_network_interface,
+    setup_wireguard_interface,
+    parse_wireguard_conf,
+    route_ssh_via_primary_network_interface,
+    unpack_wireguard_config,
+    check_wireguard_installed,
+    load_wireguard_module,
+    parse_socks_config,
+)
 from security_ghost import __version__
 from requests.adapters import HTTPAdapter
 import socket
@@ -14,15 +27,9 @@ import subprocess
 __author__ = "Aaron Wilmoth"
 __copyright__ = "Aaron Wilmoth"
 __license__ = "MIT"
-# __version__ = "0.1.0"
 
 _logger = logging.getLogger(__name__)
 
-
-# ---- CLI ----
-# The functions defined in this section are wrappers around the main Python
-# API allowing them to be called directly from the terminal as a CLI
-# executable/script.
 
 def parse_args(args):
     """Parse command line parameters
@@ -89,7 +96,10 @@ def setup_logging(loglevel):
     """
     logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
     logging.basicConfig(
-        level=loglevel, stream=sys.stdout, format=logformat, datefmt="%Y-%m-%d %H:%M:%S"
+        level=loglevel,
+        stream=sys.stdout,
+        format=logformat,
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
 
@@ -107,16 +117,20 @@ class TunneledHTTPAdapter(HTTPAdapter):
 def main(args):
     args = parse_args(args)
     setup_logging(args.loglevel)
-    
+
     print(f"Using VPN config: {args.vpn_config}")
     print(f"Using SOCKS config: {args.socks_config}")
-    
+    if am_i_online():
+        print("[+] System is online")
+    else:
+        print("[-] System is not online")
+        return
     if args.change_mac == "yes":
         interface = get_primary_network_interface()
         if not interface:
             print("[-] Could not detect primary network interface")
             return
-            
+
         print(f"[+] Detected primary interface: {interface}")
         current_mac = get_current_mac(interface)
         print(f"[+] Current MAC: {current_mac}")
@@ -132,17 +146,17 @@ def main(args):
 
     # Read SOCKS configuration
     socks_config = parse_socks_config(args.socks_config)
-    
+
     with requests.Session() as session:
         sock = socks.socksocket()
-        proxy_type = getattr(socks, socks_config['type'])
+        proxy_type = getattr(socks, socks_config["type"])
         sock.setproxy(
             proxy_type,
-            socks_config['host'],
-            socks_config['port'],
+            socks_config["host"],
+            socks_config["port"],
             True,
-            socks_config['username'],
-            socks_config['password']
+            socks_config["username"],
+            socks_config["password"],
         )
         session.mount("http://", TunneledHTTPAdapter(sock))
         session.mount("https://", TunneledHTTPAdapter(sock))
@@ -190,9 +204,7 @@ def main(args):
 
                 # Route SSH traffic via primary network interface
                 route_ssh_via_primary_network_interface(interface)
-                print(
-                    "[+] SSH traffic is being routed via primary network interface."
-                )
+                print("[+] SSH traffic is being routed via primary network interface.")
 
             else:
                 print("[-] Please install WireGuard to proceed.")
@@ -212,14 +224,4 @@ def run():
 
 
 if __name__ == "__main__":
-    # ^  This is a guard statement that will prevent the following code from
-    #    being executed in the case someone imports this file instead of
-    #    executing it as a script.
-    #    https://docs.python.org/3/library/__main__.html
-
-    # After installing your project with pip, users can also run your Python
-    # modules as scripts via the ``-m`` flag, as defined in PEP 338::
-    #
-    #     python -m security_ghost.skeleton --socks socks.conf --vpn wireguard.conf
-    #
     run()
