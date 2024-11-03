@@ -154,18 +154,15 @@ def main(args):
         (
             interface_private_key,
             interface_address,
-            # interface_dns,
             peer_public_key,
             peer_allowed_ips,
             peer_endpoint,
-            # peer_preshared_key,
         ) = unpack_wireguard_config(config_data)
         client_name = "wg0"
         local_ip = interface_address.split("/")[0]
         try:
             client_private_key = Key(interface_private_key)
             peer_public_key = Key(peer_public_key)
-            # peer_preshared_key = Key(peer_preshared_key)
 
             client = Client(client_name, client_private_key, local_ip)
 
@@ -226,5 +223,3 @@ if __name__ == "__main__":
     #     python -m security_ghost.skeleton --socks socks.conf --vpn wireguard.conf
     #
     run()
-    # print(sys.argv)
-    # security-ghost --socks socks.conf --vpn wireguard.conf --dns cloudflare

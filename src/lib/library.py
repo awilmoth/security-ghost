@@ -139,7 +139,7 @@ def get_random_mac():
     Returns:
     str: A randomly generated MAC address in the format 'xx:xx:xx:xx:xx:xx', or False if the file is not found.
     """
-    if os.path.exists("mac-vendor.txt"):
+    if os.path.exists("./mac-vendor.txt"):
         with open("mac-vendor.txt", "r") as read_file:
             content = read_file.readlines()
             vendor_octets = random.choice(content)[:6]
@@ -357,13 +357,13 @@ def unpack_wireguard_config(config):
 
 def get_primary_network_interface():
     """
-    Function to get the name of the primary network interface on Ubuntu.
+    Function to get the name of the primary network interface on Linux.
     Returns the interface used by the default route.
     """
     try:
-        # Get the default route interface
+        # Get the default route interface using ip command
         output = subprocess.check_output(
-            "route -n | grep '^0.0.0.0' | grep -o '[^ ]*$'",
+            "ip route show default | awk '/default/ {print $5}'",
             shell=True,
             text=True
         ).strip()
