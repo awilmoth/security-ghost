@@ -396,9 +396,9 @@ def get_primary_network_interface():
         return None
 
 
-def setup_encrypted_dns(dns_provider="quad9"):
+def setup_encrypted_dns(dns_provider="cloudflare"):
     """
-    Setup encrypted DNS using DNS-over-TLS with either Quad9 or Cloudflare.
+    Setup encrypted DNS using DNS-over-TLS with either Quad9, Cloudflare, or Mullvad.
     """
     dns_configs = {
         "quad9": {
@@ -410,11 +410,16 @@ def setup_encrypted_dns(dns_provider="quad9"):
             "ip": "1.1.1.1",
             "port": "853",
             "hostname": "cloudflare-dns.com"
+        },
+        "mullvad": {
+            "ip": "194.242.2.2",
+            "port": "853",
+            "hostname": "dns.mullvad.net"
         }
     }
     
     if dns_provider.lower() not in dns_configs:
-        print(f"[-] Invalid DNS provider. Choose either 'quad9' or 'cloudflare'")
+        print(f"[-] Invalid DNS provider. Choose either 'quad9', 'cloudflare', or 'mullvad'")
         return False
     
     config = dns_configs[dns_provider.lower()]
