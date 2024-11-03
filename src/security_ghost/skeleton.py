@@ -21,6 +21,7 @@ from lib.library import (
     change_mac_linux,
     setup_encrypted_dns,
     TunneledHTTPAdapter,
+    cleanup_connection,
 )
 from security_ghost import __version__
 from requests.adapters import HTTPAdapter
@@ -123,31 +124,6 @@ def setup_logging(loglevel):
         format=logformat,
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-
-def cleanup_connection(interface):
-    """Clean up the secure connection"""
-    # Get permanent MAC address
-    try:
-        result = subprocess.run(['ethtool', '-P', interface], capture_output=True, text=True)
-        perm_mac = result.stdout.strip().split()[-1]
-        change_mac_linux(interface, perm_mac)
-        print(f"[+] MAC address restored to permanent address: {perm_mac}")
-    except Exception as e:
-        print(f"[-] Failed to restore MAC address: {e}")
-
-    # Remove WireGuard interface
-    try:
-        subprocess.run(['sudo', 'ip', 'link', 'delete', 'wg0'], check=True)
-        print("[+] WireGuard interface removed")
-    except subprocess.CalledProcessError:
-        print("[-] Failed to remove WireGuard interface")
-
-    # Reset routing
-    try:
-        subprocess.run(['sudo', 'ip', 'route', 'flush', 'table', '200'], check=True)
-        print("[+] Custom routing rules removed")
-    except subprocess.CalledProcessError:
-        print("[-] Failed to remove custom routing rules")
 
 def main(args):
     args = parse_args(args)

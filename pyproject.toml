@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=64.0.0", "wheel", "pip>=22.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -13,14 +13,19 @@ dependencies = [
     "requests",
     "pysocks",
     "python-wireguard",
+    "python-decouple",
 ]
 
 [project.scripts]
 security-ghost = "security_ghost.skeleton:run"
 
 [tool.setuptools]
-package-dir = {"security_ghost" = "security_ghost/src/security_ghost", "lib" = "security_ghost/src/lib"}
-packages = ["security_ghost", "lib"]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["security_ghost*", "lib*"]
+namespaces = false
 
 [tool.setuptools.package-data]
 security_ghost = ["mac-vendor.txt"]

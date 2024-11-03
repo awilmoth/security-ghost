@@ -453,36 +453,73 @@ def setup_encrypted_dns(dns_provider="quad9"):
 
 def cleanup_connection(interface):
     """Clean up the secure connection"""
+    print("\n[DEBUG] Starting cleanup...")
+    print(f"[DEBUG] Interface: {interface}")
+    
+    # Print current routing rules
+    print("\n[DEBUG] Current routing rules:")
+    subprocess.run("sudo ip rule show", shell=True)
+    
     # Get permanent MAC address
     try:
         result = subprocess.run(['ethtool', '-P', interface], capture_output=True, text=True)
         perm_mac = result.stdout.strip().split()[-1]
+        print(f"[DEBUG] Found permanent MAC: {perm_mac}")
         change_mac_linux(interface, perm_mac)
         print(f"[+] MAC address restored to permanent address: {perm_mac}")
     except Exception as e:
         print(f"[-] Failed to restore MAC address: {e}")
 
-    # Remove WireGuard interface
+    print("\n[DEBUG] Checking for WireGuard interface...")
+    # Check if WireGuard interface exists
+    wg_check = subprocess.run(['ip', 'link', 'show', 'wg0'], capture_output=True, text=True)
+    print(f"[DEBUG] WireGuard check result: {wg_check.stdout}")
+
+    # Remove WireGuard interface (if it exists)
     try:
-        subprocess.run(['sudo', 'ip', 'link', 'delete', 'wg0'], check=False)
+        subprocess.run(['sudo', 'ip', 'link', 'del', 'dev', 'wg0'], check=False, stderr=subprocess.DEVNULL)
         print("[+] WireGuard interface removed")
     except subprocess.CalledProcessError:
-        print("[-] Failed to remove WireGuard interface")
+        print("[-] No WireGuard interface to remove")
 
-    # Reset routing rules
+    print("\n[DEBUG] Starting routing rules cleanup...")
+    
+    # Clean up routing rules using shell commands
     cleanup_commands = [
-        "sudo ip rule del table 51820 2>/dev/null || true",
-        "sudo ip rule del table 100 2>/dev/null || true",
-        "sudo ip route flush table 51820 2>/dev/null || true",
-        "sudo ip route flush table 100 2>/dev/null || true",
-        "sudo iptables -t mangle -D OUTPUT -p tcp --sport 22 -j MARK --set-mark 0x1 2>/dev/null || true",
-        "sudo iptables -t mangle -D OUTPUT -p tcp --dport 22 -j MARK --set-mark 0x1 2>/dev/null || true"
+        # Remove all rules except default ones
+        "sudo ip rule show | grep -v 'lookup local\\|lookup main\\|lookup default' | cut -d ':' -f 1 | xargs -r -L 1 sudo ip rule del prio",
+        # Remove iptables rules
+        "sudo iptables -t mangle -F",  # Flush mangle table
+        "sudo iptables -t mangle -X"   # Delete custom chains in mangle table
     ]
 
     for cmd in cleanup_commands:
         try:
-            subprocess.run(cmd, shell=True, check=False)
-        except subprocess.CalledProcessError:
-            pass
+            print(f"\n[DEBUG] Running command: {cmd}")
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            print(f"[DEBUG] Command output: {result.stdout}")
+            print(f"[DEBUG] Command error: {result.stderr}")
+        except subprocess.CalledProcessError as e:
+            print(f"[DEBUG] Command failed with error: {e}")
 
-    print("[+] Routing rules cleaned up")
+    print("\n[DEBUG] Checking remaining routing rules:")
+    subprocess.run("sudo ip rule show", shell=True)
+
+    print("\n[DEBUG] Checking iptables mangle table:")
+    subprocess.run("sudo iptables -t mangle -L", shell=True)
+
+    # Restore default route if needed
+    try:
+        print("\n[DEBUG] Restarting networking...")
+        subprocess.run(['sudo', 'systemctl', 'restart', 'systemd-networkd'], check=False)
+        print("[+] Network service restarted")
+    except subprocess.CalledProcessError:
+        print("[-] Failed to restart network service")
+
+    print("\n[DEBUG] Final routing rules:")
+    subprocess.run("sudo ip rule show", shell=True)
+    
+    print("\n[DEBUG] Final routing table:")
+    subprocess.run("sudo ip route show", shell=True)
+
+    print("\n[+] Network cleanup completed")
