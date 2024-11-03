@@ -133,11 +133,13 @@ def check_mac_vendor_file():
     """Check if mac-vendor.txt exists in the package directory"""
     # Get the directory where the library.py file is located
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    # Look for mac-vendor.txt in the package directory
-    vendor_file = os.path.join(current_dir, '..', 'security_ghost', 'mac-vendor.txt')
+    # Go up to src directory and then into security_ghost
+    vendor_file = os.path.join(os.path.dirname(current_dir), 'security_ghost', 'mac-vendor.txt')
     
     if not os.path.exists(vendor_file):
         raise FileNotFoundError("Required file 'mac-vendor.txt' not found at: " + vendor_file)
+    
+    print(f"[+] Found mac-vendor.txt at: {vendor_file}")  # Debug line
     return vendor_file
 
 
@@ -219,7 +221,6 @@ def change_mac_linux(interface, new_mac):
         )
         subprocess.check_call(["sudo", "service", "networking", "restart"])
 
-        print(f"[+] MAC address changed successfully to {new_mac}")
     except subprocess.CalledProcessError as e:
         print(f"[-] Failed to change MAC address: {e}")
 
