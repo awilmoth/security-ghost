@@ -160,9 +160,16 @@ def main(args):
         )
         session.mount("http://", TunneledHTTPAdapter(sock))
         session.mount("https://", TunneledHTTPAdapter(sock))
-        print(
-            f"SOCKS proxy connected to server at: {session.get('https://httpbin.org/ip').json()['origin']}"
-        )
+        # Get the IP address when using SOCKS proxy
+        socks_ip = session.get('https://httpbin.org/ip').json()['origin']
+        
+        # Get IP of primary interface
+        interface_ip = requests.get('https://httpbin.org/ip').json()['origin']
+        
+        if socks_ip == interface_ip:
+            raise RuntimeError(f"SOCKS proxy is not working - traffic is going through primary interface (IP: {interface_ip})")
+            
+        print(f"SOCKS proxy connected to server at: {socks_ip}")
 
         config_data = parse_wireguard_conf(args.vpn_config)
         (
