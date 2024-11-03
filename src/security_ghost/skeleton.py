@@ -17,11 +17,16 @@ from lib.library import (
     check_wireguard_installed,
     load_wireguard_module,
     parse_socks_config,
+    get_current_mac,
+    change_mac_linux,
+    setup_encrypted_dns,
+    TunneledHTTPAdapter,
 )
 from security_ghost import __version__
 from requests.adapters import HTTPAdapter
 import socket
 import subprocess
+import os
 
 
 __author__ = "Aaron Wilmoth"
@@ -85,6 +90,12 @@ def parse_args(args):
         action="store_const",
         const=logging.DEBUG,
     )
+    parser.add_argument(
+        "--dns",
+        choices=["quad9", "cloudflare"],
+        default="quad9",
+        help="Choose DNS provider for encrypted DNS (default: quad9)"
+    )
     return parser.parse_args(args)
 
 
@@ -101,18 +112,6 @@ def setup_logging(loglevel):
         format=logformat,
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-
-
-class TunneledHTTPAdapter(HTTPAdapter):
-    def __init__(self, sock, **kwargs):
-        self.sock = sock
-        super().__init__(**kwargs)
-
-    def get_connection(self, url, proxies=None):
-        conn = super().get_connection(url, proxies)
-        conn.sock = self.sock
-        return conn
-
 
 def main(args):
     args = parse_args(args)
@@ -144,6 +143,11 @@ def main(args):
     else:
         print("[*] MAC address changing is disabled")
 
+    # Setup encrypted DNS
+    if not setup_encrypted_dns(args.dns):
+        print("[-] Failed to setup encrypted DNS")
+        return
+
     # Read SOCKS configuration
     socks_config = parse_socks_config(args.socks_config)
 
@@ -169,7 +173,7 @@ def main(args):
         if socks_ip == interface_ip:
             raise RuntimeError(f"SOCKS proxy is not working - traffic is going through primary interface (IP: {interface_ip})")
             
-        print(f"SOCKS proxy connected to server at: {socks_ip}")
+        print(f"[+]SOCKS proxy connected to server at: {socks_ip}")
 
         config_data = parse_wireguard_conf(args.vpn_config)
         (
@@ -199,7 +203,7 @@ def main(args):
             client.set_server(server_conn)
             client.connect()
 
-            print("WireGuard client connected successfully.")
+            print("[+]WireGuard client connected successfully.")
 
             # Check if WireGuard is installed and load the module
             if check_wireguard_installed():
@@ -207,7 +211,7 @@ def main(args):
 
                 # Setup wg0 interface
                 setup_wireguard_interface()
-                print("Wireguard interface set up successfully")
+                print("[+] Wireguard interface set up successfully")
 
                 # Route SSH traffic via primary network interface
                 route_ssh_via_primary_network_interface(interface)

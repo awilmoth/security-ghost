@@ -129,6 +129,18 @@ def am_i_online(url="https://dns.google"):
         return False
 
 
+def check_mac_vendor_file():
+    """Check if mac-vendor.txt exists in the package directory"""
+    # Get the directory where the library.py file is located
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # Look for mac-vendor.txt in the package directory
+    vendor_file = os.path.join(current_dir, '..', 'security_ghost', 'mac-vendor.txt')
+    
+    if not os.path.exists(vendor_file):
+        raise FileNotFoundError("Required file 'mac-vendor.txt' not found at: " + vendor_file)
+    return vendor_file
+
+
 def get_random_mac():
     """
     Generate a random MAC address.
@@ -140,9 +152,9 @@ def get_random_mac():
     Raises:
     FileNotFoundError: If mac-vendor.txt file is not found
     """
-    check_mac_vendor_file()  # This will raise FileNotFoundError if file doesn't exist
+    vendor_file = check_mac_vendor_file()  # Get the full path to the file
     
-    with open("mac-vendor.txt", "r") as read_file:
+    with open(vendor_file, "r") as read_file:
         content = read_file.readlines()
         vendor_octets = random.choice(content)[:6]
         hex_num = hex(random.randint(0, 16**6))[2:].zfill(6).upper()
@@ -154,11 +166,6 @@ def get_random_mac():
             hex_num[2:4],
             hex_num[4:6],
         ).lower()
-
-
-def check_mac_vendor_file():
-    if not os.path.exists('mac-vendor.txt'):
-        raise FileNotFoundError("Required file 'mac-vendor.txt' not found. Please ensure the file exists in the correct location.")
 
 
 def get_current_mac(interface):
@@ -199,6 +206,10 @@ def change_mac_linux(interface, new_mac):
     Returns:
     None
     """
+    if not new_mac:
+        print("[-] Invalid MAC address provided. MAC address change aborted.")
+        return
+
     print(f"[+] Changing MAC Address for {interface} to {new_mac}")
 
     try:
@@ -382,3 +393,59 @@ def get_primary_network_interface():
     except subprocess.CalledProcessError as e:
         print(f"[-] Failed to get primary network interface: {e}")
         return None
+
+
+def setup_encrypted_dns(dns_provider="quad9"):
+    """
+    Setup encrypted DNS proxy using either Quad9 or Cloudflare.
+    
+    Parameters:
+    dns_provider (str): The DNS provider to use ('quad9' or 'cloudflare'). Defaults to 'quad9'.
+    
+    Returns:
+    bool: True if setup successful, False otherwise
+    """
+    dns_configs = {
+        "quad9": {
+            "ip": "9.9.9.9",
+            "port": "853",
+            "hostname": "dns.quad9.net"
+        },
+        "cloudflare": {
+            "ip": "1.1.1.1",
+            "port": "853",
+            "hostname": "cloudflare-dns.com"
+        }
+    }
+    
+    if dns_provider.lower() not in dns_configs:
+        print(f"[-] Invalid DNS provider. Choose either 'quad9' or 'cloudflare'")
+        return False
+    
+    config = dns_configs[dns_provider.lower()]
+    
+    try:
+        # Setup DNS-over-TLS using systemd-resolved
+        commands = [
+            f"sudo mkdir -p /etc/systemd/resolved.conf.d/",
+            f"sudo bash -c 'cat > /etc/systemd/resolved.conf.d/encrypted-dns.conf << EOL\n"
+            f"[Resolve]\n"
+            f"DNS={config['ip']}\n"
+            f"DNSOverTLS=yes\n"
+            f"DNSSEC=yes\n"
+            f"Domains=~.\n"
+            f"EOL'",
+            "sudo systemctl restart systemd-resolved"
+        ]
+        
+        for command in commands:
+            run_shell_command(command)
+            
+        print(f"[+] Encrypted DNS setup complete using {dns_provider}")
+        print(f"[+] DNS Server: {config['ip']}")
+        print(f"[+] Hostname: {config['hostname']}")
+        return True
+        
+    except Exception as e:
+        print(f"[-] Failed to setup encrypted DNS: {e}")
+        return False
