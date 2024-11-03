@@ -139,7 +139,6 @@ def check_mac_vendor_file():
     if not os.path.exists(vendor_file):
         raise FileNotFoundError("Required file 'mac-vendor.txt' not found at: " + vendor_file)
     
-    print(f"[+] Found mac-vendor.txt at: {vendor_file}")  # Debug line
     return vendor_file
 
 

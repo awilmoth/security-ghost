@@ -1,12 +1,25 @@
 [build-system]
-# AVOID CHANGING REQUIRES: IT WILL BE UPDATED BY PYSCAFFOLD!
-requires = ["setuptools>=46.1.0", "setuptools_scm[toml]>=5"]
+requires = ["setuptools>=42", "wheel", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools_scm]
-# For smarter version schemes and other configuration options,
-# check out https://github.com/pypa/setuptools_scm
-version_scheme = "no-guess-dev"
+[project]
+name = "security-ghost"
+version = "0.1.0"
+description = "A security tool for anonymous networking"
+authors = [{name = "Aaron Wilmoth"}]
+license = {text = "MIT"}
+requires-python = ">=3.8"
+dependencies = [
+    "requests",
+    "pysocks",
+    "python-wireguard",
+]
+
+[project.scripts]
+security-ghost = "security_ghost.skeleton:run"
+
+[tool.setuptools]
+packages = ["security_ghost"]
 
 [tool.setuptools.package-data]
 security_ghost = ["mac-vendor.txt"]

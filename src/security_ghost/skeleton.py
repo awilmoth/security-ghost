@@ -83,7 +83,30 @@ def parse_args(args):
     # Down command
     down_parser = subparsers.add_parser('down', help='Bring down the secure connection')
 
-    # ... keep existing version and verbosity arguments ...
+    # Add version and verbosity arguments to the main parser
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"security-ghost {__version__}",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        dest="loglevel",
+        help="set loglevel to INFO",
+        action="store_const",
+        const=logging.INFO,
+    )
+    parser.add_argument(
+        "-vv",
+        "--very-verbose",
+        dest="loglevel",
+        help="set loglevel to DEBUG",
+        action="store_const",
+        const=logging.DEBUG,
+    )
+    parser.set_defaults(loglevel=logging.WARNING)
+
     return parser.parse_args(args)
 
 
