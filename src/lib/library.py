@@ -12,14 +12,6 @@ import configparser
 import requests
 
 
-# Extracting SOCKS proxy variables from environment using decouple
-SOCKS_TYPE = config("SOCKS_TYPE")
-SOCKS_HOST = config("SOCKS_HOST")
-SOCKS_PORT = config("SOCKS_PORT", cast=int)
-SOCKS_USERNAME = config("SOCKS_USERNAME")
-SOCKS_PASSWORD = config("SOCKS_PASSWORD")
-
-
 def run_shell_command(command):
     """
     Function to run shell commands and handle errors.
@@ -298,6 +290,30 @@ class TunneledHTTPAdapter(requests.adapters.BaseAdapter):
         return resp
 
 
+def parse_socks_config(config_path):
+    """Parse SOCKS proxy configuration file"""
+    config = {}
+    with open(config_path) as f:
+        for line in f:
+            if line.strip() and not line.startswith('#'):
+                key, value = line.strip().split('=')
+                config[key.strip()] = value.strip()
+    
+    # Validate required fields in original format
+    required_fields = ['SOCKS_TYPE', 'SOCKS_HOST', 'SOCKS_PORT', 'SOCKS_USERNAME', 'SOCKS_PASSWORD']
+    missing_fields = [field for field in required_fields if field not in config]
+    if missing_fields:
+        raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
+    
+    return {
+        'type': config['SOCKS_TYPE'],
+        'host': config['SOCKS_HOST'],
+        'port': int(config['SOCKS_PORT']),
+        'username': config['SOCKS_USERNAME'],
+        'password': config['SOCKS_PASSWORD']
+    }
+
+
 def parse_wireguard_conf(file_path):
     """
     Parse a WireGuard configuration (.conf) file and extract its information.
@@ -345,21 +361,26 @@ def unpack_wireguard_config(config):
 
 def get_primary_network_interface():
     """
-    Function to get the name of the primary network interface.
-    On modern systems, 'ip route show' can be used to find the default gateway interface.
+    Function to get the name of the primary network interface on Ubuntu.
+    Returns the interface used by the default route.
     """
     try:
-        # Execute the command and get the output
-        output = subprocess.check_output("ip route show default", shell=True, text=True)
-        # Parse the output to find the primary interface
-        for line in output.splitlines():
-            if "default via" in line:
-                parts = line.split()
-                if "dev" in parts:
-                    interface = parts[parts.index("dev") + 1]
-                    return interface
+        # Get the default route interface
+        output = subprocess.check_output(
+            "route -n | grep '^0.0.0.0' | grep -o '[^ ]*$'",
+            shell=True,
+            text=True
+        ).strip()
+        
+        if output:
+            print(f"[+] Primary network interface: {output}")
+            return output
+        else:
+            print("[-] No primary network interface found")
+            return None
+            
     except subprocess.CalledProcessError as e:
-        print(f"[-] Command failed: {e}")
+        print(f"[-] Failed to get primary network interface: {e}")
         return None
 
 

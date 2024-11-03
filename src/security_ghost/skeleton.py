@@ -1,30 +1,15 @@
-"""
-This is a skeleton file that can serve as a starting point for a Python
-console script. To run this script uncomment the following lines in the
-``[options.entry_points]`` section in ``setup.cfg``::
-
-    console_scripts =
-         fibonacci = security_ghost.skeleton:run
-
-Then run ``pip install .`` (or ``pip install -e .`` for editable mode)
-which will install the command ``fibonacci`` inside your current environment.
-
-Besides console scripts, the header (i.e. until ``_logger``...) of this file can
-also be used as template for Python modules.
-
-Note:
-    This file can be renamed depending on your needs or safely removed if not needed.
-
-References:
-    - https://setuptools.pypa.io/en/latest/userguide/entry_point.html
-    - https://pip.pypa.io/en/stable/reference/pip_install
-"""
-
 import argparse
 import logging
 import sys
-from lib.library import am_i_online, get_current_mac, change_mac_linux, get_random_mac
+import requests
+import socks
+from python_wireguard import Key, Client, ServerConnection
+from lib.library import am_i_online, get_current_mac, change_mac_linux, get_random_mac, get_primary_network_interface, setup_wireguard_interface, parse_wireguard_conf, route_ssh_via_primary_network_interface, unpack_wireguard_config, check_wireguard_installed, load_wireguard_module, parse_socks_config
 from security_ghost import __version__
+from requests.adapters import HTTPAdapter
+import socket
+import subprocess
+
 
 __author__ = "Aaron Wilmoth"
 __copyright__ = "Aaron Wilmoth"
@@ -34,46 +19,20 @@ __license__ = "MIT"
 _logger = logging.getLogger(__name__)
 
 
-# ---- Python API ----
-# The functions defined in this section can be imported by users in their
-# Python scripts/interactive interpreter, e.g. via
-# `from security_ghost.skeleton import fib`,
-# when using this Python module as a library.
-
-
-def fib(n):
-    """Fibonacci example function
-
-    Args:
-      n (int): integer
-
-    Returns:
-      int: n-th Fibonacci number
-    """
-    assert n > 0
-    a, b = 1, 1
-    for _i in range(n - 1):
-        a, b = b, a + b
-    return a
-
-
 # ---- CLI ----
 # The functions defined in this section are wrappers around the main Python
 # API allowing them to be called directly from the terminal as a CLI
 # executable/script.
-
 
 def parse_args(args):
     """Parse command line parameters
 
     Args:
       args (List[str]): command line parameters as list of strings
-          (for example  ``["--help"]``).
 
     Returns:
       :obj:`argparse.Namespace`: command line parameters namespace
     """
-
     parser = argparse.ArgumentParser(description="Security Ghost Version")
     parser.add_argument(
         "--version",
@@ -95,6 +54,13 @@ def parse_args(args):
         help="VPN config file path",
         type=str,
         metavar="VPN_PATH",
+    )
+    parser.add_argument(
+        "--change_mac",
+        dest="change_mac",
+        choices=["yes", "no"],
+        default="yes",
+        help="Enable/disable MAC address changing (default: yes)",
     )
     parser.add_argument(
         "-v",
@@ -127,34 +93,117 @@ def setup_logging(loglevel):
     )
 
 
+class TunneledHTTPAdapter(HTTPAdapter):
+    def __init__(self, sock, **kwargs):
+        self.sock = sock
+        super().__init__(**kwargs)
+
+    def get_connection(self, url, proxies=None):
+        conn = super().get_connection(url, proxies)
+        conn.sock = self.sock
+        return conn
+
+
 def main(args):
-    """Wrapper allowing :func:`fib` to be called with string arguments in a CLI fashion
-
-    Instead of returning the value from :func:`fib`, it prints the result to the
-    ``stdout`` in a nicely formatted message.
-
-    Args:
-      args (List[str]): command line parameters as list of strings
-          (for example  ``["--verbose", "42"]``).
-    """
     args = parse_args(args)
-    print(args)
     setup_logging(args.loglevel)
-    # _logger.debug("Starting crazy calculations...")
-    # print(f"The {args.n}-th Fibonacci number is {fib(args.n)}")
-    # _logger.info("Script ends here")
-    print(am_i_online())
-    if am_i_online():
-        _logger.info("*You are online*")
-    current_mac = get_current_mac("en0")
-    print("[+] Current Mac :" + current_mac)
-    change_mac_linux("en0", "000E04DB5F02")
-    current_mac = get_current_mac("en0")
-
-    if current_mac == get_random_mac():
-        print("[+] Mac address was successfully changed to  :" + current_mac)
+    
+    print(f"Using VPN config: {args.vpn_config}")
+    print(f"Using SOCKS config: {args.socks_config}")
+    
+    if args.change_mac == "yes":
+        interface = get_primary_network_interface()
+        if not interface:
+            print("[-] Could not detect primary network interface")
+            return
+            
+        print(f"[+] Detected primary interface: {interface}")
+        current_mac = get_current_mac(interface)
+        print(f"[+] Current MAC: {current_mac}")
+        new_mac = get_random_mac()
+        change_mac_linux(interface, new_mac)
+        current_mac = get_current_mac(interface)
+        if current_mac == new_mac:
+            print(f"[+] MAC address was successfully changed to: {current_mac}")
+        else:
+            print("[-] MAC address did not get changed.")
     else:
-        print("[-] Mac address did not get changed .")
+        print("[*] MAC address changing is disabled")
+
+    # Read SOCKS configuration
+    socks_config = parse_socks_config(args.socks_config)
+    
+    with requests.Session() as session:
+        sock = socks.socksocket()
+        proxy_type = getattr(socks, socks_config['type'])
+        sock.setproxy(
+            proxy_type,
+            socks_config['host'],
+            socks_config['port'],
+            True,
+            socks_config['username'],
+            socks_config['password']
+        )
+        session.mount("http://", TunneledHTTPAdapter(sock))
+        session.mount("https://", TunneledHTTPAdapter(sock))
+        print(
+            f"SOCKS proxy connected to server at: {session.get('https://httpbin.org/ip').json()['origin']}"
+        )
+
+        config_data = parse_wireguard_conf(args.vpn_config)
+        (
+            interface_private_key,
+            interface_address,
+            # interface_dns,
+            peer_public_key,
+            peer_allowed_ips,
+            peer_endpoint,
+            # peer_preshared_key,
+        ) = unpack_wireguard_config(config_data)
+        client_name = "wg0"
+        local_ip = interface_address.split("/")[0]
+        try:
+            client_private_key = Key(interface_private_key)
+            peer_public_key = Key(peer_public_key)
+            # peer_preshared_key = Key(peer_preshared_key)
+
+            client = Client(client_name, client_private_key, local_ip)
+
+            endpoint = peer_endpoint.split(":")[0]
+            port = int(peer_endpoint.split(":")[1])
+
+            server_conn = ServerConnection(
+                peer_public_key,
+                endpoint,
+                port,
+            )
+
+            client.set_server(server_conn)
+            client.connect()
+
+            print("WireGuard client connected successfully.")
+
+            # Check if WireGuard is installed and load the module
+            if check_wireguard_installed():
+                load_wireguard_module()
+
+                # Setup wg0 interface
+                setup_wireguard_interface()
+                print("Wireguard interface set up successfully")
+
+                # Route SSH traffic via primary network interface
+                route_ssh_via_primary_network_interface(interface)
+                print(
+                    "[+] SSH traffic is being routed via primary network interface."
+                )
+
+            else:
+                print("[-] Please install WireGuard to proceed.")
+
+        except ValueError as e:
+            print(f"Error: {e}")
+        except Exception as e:
+            print(f"Unexpected error: {e}")
 
 
 def run():
