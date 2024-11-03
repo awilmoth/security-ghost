@@ -77,8 +77,8 @@ def parse_args(args):
     up_parser.add_argument(
         "--dns",
         choices=["quad9", "cloudflare"],
-        default="quad9",
-        help="Choose DNS provider for encrypted DNS (default: quad9)"
+        default="cloudflare",
+        help="Choose DNS provider for encrypted DNS (default: cloudflare)"
     )
 
     # Down command

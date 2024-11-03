@@ -10,6 +10,7 @@ import socks
 from python_wireguard import Key, Client, ServerConnection
 import configparser
 import requests
+import string
 
 
 def run_shell_command(command):
@@ -535,3 +536,142 @@ def cleanup_connection(interface):
         print("[-] Failed to restart network services")
 
     print("[+] Network cleanup completed")
+
+
+def setup_wireguard_server(interface, port, subnet):
+    """
+    Setup WireGuard server configuration
+    
+    Args:
+        interface (str): Network interface to use
+        port (int): Port to listen on
+        subnet (str): Subnet for WireGuard network
+    """
+    try:
+        # Generate server keys
+        private_key = subprocess.check_output(["wg", "genkey"], text=True).strip()
+        public_key = subprocess.run(["wg", "pubkey"], input=private_key, text=True, capture_output=True).stdout.strip()
+        
+        # Create WireGuard configuration
+        config = f"""[Interface]
+PrivateKey = {private_key}
+Address = {subnet.split('/')[0].rsplit('.', 1)[0]}.1/24
+ListenPort = {port}
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o {interface} -j MASQUERADE
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o {interface} -j MASQUERADE"""
+
+        # Write configuration
+        with open('/tmp/wg0.conf', 'w') as f:
+            f.write(config)
+            
+        commands = [
+            "sudo mv /tmp/wg0.conf /etc/wireguard/wg0.conf",
+            "sudo chmod 600 /etc/wireguard/wg0.conf",
+            "sudo systemctl enable wg-quick@wg0",
+            "sudo systemctl start wg-quick@wg0"
+        ]
+        
+        for cmd in commands:
+            subprocess.run(cmd, shell=True, check=True)
+            
+        print(f"[+] WireGuard server configured on port {port}")
+        print(f"[+] Server public key: {public_key}")
+        
+    except subprocess.CalledProcessError as e:
+        print(f"[-] Failed to setup WireGuard server: {e}")
+        return False
+    except Exception as e:
+        print(f"[-] Unexpected error: {e}")
+        return False
+
+
+def generate_password(length=16):
+    """Generate a secure random password"""
+    characters = string.ascii_letters + string.digits + "!@#$%^&*"
+    return ''.join(random.choice(characters) for _ in range(length))
+
+
+def setup_dante_proxy(port, interface):
+    """
+    Setup Dante SOCKS proxy with authentication
+    
+    Args:
+        port (int): Port to listen on
+        interface (str): Network interface to use
+    """
+    try:
+        # Generate random password
+        password = generate_password()
+        
+        # Create socks user
+        commands = [
+            "sudo useradd -r -s /bin/false socks_user",
+            f"echo 'socks_user:{password}' | sudo chpasswd"
+        ]
+        
+        for cmd in commands:
+            subprocess.run(cmd, shell=True, check=True)
+        
+        # Configure Dante
+        config = f"""logoutput: syslog
+internal: {interface} port = {port}
+external: {interface}
+
+socksmethod: username
+clientmethod: none
+
+user.privileged: root
+user.unprivileged: socks_user
+
+client pass {{
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    log: error connect disconnect
+}}
+
+socks pass {{
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    log: error connect disconnect
+    socksmethod: username
+}}"""
+
+        with open('/tmp/danted.conf', 'w') as f:
+            f.write(config)
+            
+        commands = [
+            "sudo apt-get install -y dante-server",
+            "sudo mv /tmp/danted.conf /etc/danted.conf",
+            "sudo systemctl restart danted"
+        ]
+        
+        for cmd in commands:
+            subprocess.run(cmd, shell=True, check=True)
+            
+        print(f"[+] Dante SOCKS proxy configured on port {port}")
+        print(f"[+] SOCKS5 credentials:")
+        print(f"    Username: socks_user")
+        print(f"    Password: {password}")
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        print(f"[-] Failed to setup Dante proxy: {e}")
+        return False
+    except Exception as e:
+        print(f"[-] Unexpected error: {e}")
+        return False
+
+
+def check_dante_installed():
+    """
+    Check if Dante SOCKS proxy is installed.
+    """
+    try:
+        output = subprocess.check_output(["which", "danted"], encoding="utf-8").strip()
+        if output:
+            print("[+] Dante SOCKS proxy is installed")
+            return True
+        else:
+            print("[-] Dante SOCKS proxy is not installed")
+            return False
+    except subprocess.CalledProcessError:
+        print("[-] Dante SOCKS proxy is not installed")
+        return False
