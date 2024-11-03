@@ -133,28 +133,32 @@ def get_random_mac():
     """
     Generate a random MAC address.
 
-    Uses the 'mac-vendor.txt' file if it exists to get vendor-specific MAC address prefixes.
-    Otherwise, returns False.
+    Uses the 'mac-vendor.txt' file to get vendor-specific MAC address prefixes.
 
     Returns:
-    str: A randomly generated MAC address in the format 'xx:xx:xx:xx:xx:xx', or False if the file is not found.
+    str: A randomly generated MAC address in the format 'xx:xx:xx:xx:xx:xx'
+    Raises:
+    FileNotFoundError: If mac-vendor.txt file is not found
     """
-    if os.path.exists("./mac-vendor.txt"):
-        with open("mac-vendor.txt", "r") as read_file:
-            content = read_file.readlines()
-            vendor_octets = random.choice(content)[:6]
-            hex_num = hex(random.randint(0, 16**6))[2:].zfill(6).upper()
-            return "{}:{}:{}:{}:{}:{}".format(
-                vendor_octets[:2],
-                vendor_octets[2:4],
-                vendor_octets[4:6],
-                hex_num[:2],
-                hex_num[2:4],
-                hex_num[4:6],
-            ).lower()
-    else:
-        print("[-] 'mac-vendor.txt' file not found.")
-        return False
+    check_mac_vendor_file()  # This will raise FileNotFoundError if file doesn't exist
+    
+    with open("mac-vendor.txt", "r") as read_file:
+        content = read_file.readlines()
+        vendor_octets = random.choice(content)[:6]
+        hex_num = hex(random.randint(0, 16**6))[2:].zfill(6).upper()
+        return "{}:{}:{}:{}:{}:{}".format(
+            vendor_octets[:2],
+            vendor_octets[2:4],
+            vendor_octets[4:6],
+            hex_num[:2],
+            hex_num[2:4],
+            hex_num[4:6],
+        ).lower()
+
+
+def check_mac_vendor_file():
+    if not os.path.exists('mac-vendor.txt'):
+        raise FileNotFoundError("Required file 'mac-vendor.txt' not found. Please ensure the file exists in the correct location.")
 
 
 def get_current_mac(interface):
