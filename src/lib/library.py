@@ -341,21 +341,17 @@ def unpack_wireguard_config(config):
     # Unpacking the dictionary
     interface_private_key = config["Interface"]["privatekey"]
     interface_address = config["Interface"]["address"]
-    # interface_dns = config["Interface"]["dns"]
     peer_public_key = config["Peer"]["publickey"]
     peer_allowed_ips = config["Peer"]["allowedips"]
     peer_endpoint = config["Peer"]["endpoint"]
-    # peer_preshared_key = config["Peer"]["presharedkey"]
 
     # Returning the unpacked variables
     return (
         interface_private_key,
         interface_address,
-        # interface_dns,
         peer_public_key,
         peer_allowed_ips,
         peer_endpoint,
-        # peer_preshared_key,
     )
 
 
@@ -382,102 +378,3 @@ def get_primary_network_interface():
     except subprocess.CalledProcessError as e:
         print(f"[-] Failed to get primary network interface: {e}")
         return None
-
-
-if __name__ == "__main__":
-    online_status = am_i_online()
-    print(f"Online status: {online_status}")
-
-    if not online_status:
-        print("[-] Network is unreachable. Please check your network connection.")
-    else:
-        new_mac = get_random_mac()
-        if new_mac:
-            print(f"Generated Random MAC: {new_mac}")
-            interface = get_primary_network_interface()
-            current_mac = get_current_mac(interface)
-            if current_mac:
-                print(f"Current MAC address of {interface}: {current_mac}")
-                change_mac_linux(interface, new_mac)
-                updated_mac = get_current_mac(interface)
-                if updated_mac:
-                    print(f"Updated MAC address of {interface}: {updated_mac}")
-                    # starting proxychains for socks proxy
-                    with requests.Session() as session:
-                        sock = socks.socksocket()
-                        # Proxy setup using environment variables
-                        proxy_type = getattr(
-                            socks, SOCKS_TYPE
-                        )  # Get the actual socks proxy type
-                        sock.setproxy(
-                            proxy_type,  # SOCKS type from the environment variable
-                            SOCKS_HOST,  # Host from the environment variable
-                            SOCKS_PORT,  # Port from the environment variable
-                            True,  # remote_dns param is moved here as per the setproxy signature
-                            SOCKS_USERNAME,  # Username from the environment variable
-                            SOCKS_PASSWORD,  # Password from the environment variable
-                        )
-                        session.mount("http://", TunneledHTTPAdapter(sock))
-                        session.mount("https://", TunneledHTTPAdapter(sock))
-                        print(
-                            f"SOCKS proxy connected to server at: {session.get('https://httpbin.org/ip').json()['origin']}"
-                        )
-
-                        file_path = "/root/wireguard.conf"
-                        config_data = parse_wireguard_conf(file_path)
-                        (
-                            interface_private_key,
-                            interface_address,
-                            # interface_dns,
-                            peer_public_key,
-                            peer_allowed_ips,
-                            peer_endpoint,
-                            # peer_preshared_key,
-                        ) = unpack_wireguard_config(config_data)
-                        client_name = "wg0"
-                        local_ip = interface_address.split("/")[0]
-                        try:
-                            client_private_key = Key(interface_private_key)
-                            peer_public_key = Key(peer_public_key)
-                            # peer_preshared_key = Key(peer_preshared_key)
-
-                            client = Client(client_name, client_private_key, local_ip)
-
-                            endpoint = peer_endpoint.split(":")[0]
-                            port = int(peer_endpoint.split(":")[1])
-
-                            server_conn = ServerConnection(
-                                peer_public_key,
-                                endpoint,
-                                port,
-                            )
-
-                            client.set_server(server_conn)
-                            client.connect()
-
-                            print("WireGuard client connected successfully.")
-
-                            # Check if WireGuard is installed and load the module
-                            if check_wireguard_installed():
-                                load_wireguard_module()
-
-                                # Setup wg0 interface
-                                setup_wireguard_interface()
-                                print("Wireguard interface set up successfully")
-
-                                # Route SSH traffic via primary network interface
-                                route_ssh_via_primary_network_interface(interface)
-                                print(
-                                    "[+] SSH traffic is being routed via primary network interface."
-                                )
-
-                            else:
-                                print("[-] Please install WireGuard to proceed.")
-
-                        except ValueError as e:
-                            print(f"Error: {e}")
-                        except Exception as e:
-                            print(f"Unexpected error: {e}")
-
-        else:
-            print("[-] Could not generate MAC address.")
