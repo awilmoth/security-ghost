@@ -45,21 +45,12 @@ def parse_args(args):
     Returns:
       :obj:`argparse.Namespace`: command line parameters namespace
     """
-    parser = argparse.ArgumentParser(description="Security Ghost Version")
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"security_ghost {__version__}",
-    )
-    parser.add_argument(
-        "--socks",
-        required=True,
-        dest="socks_config",
-        help="socks proxy config file path",
-        type=str,
-        metavar="SOCKS_PATH",
-    )
-    parser.add_argument(
+    parser = argparse.ArgumentParser(description="Security Ghost")
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+    
+    # Up command
+    up_parser = subparsers.add_parser('up', help='Bring up the secure connection')
+    up_parser.add_argument(
         "--vpn",
         required=True,
         dest="vpn_config",
@@ -67,35 +58,32 @@ def parse_args(args):
         type=str,
         metavar="VPN_PATH",
     )
-    parser.add_argument(
+    up_parser.add_argument(
+        "--socks",
+        required=True,
+        dest="socks_config",
+        help="socks proxy config file path",
+        type=str,
+        metavar="SOCKS_PATH",
+    )
+    up_parser.add_argument(
         "--change_mac",
         dest="change_mac",
         choices=["yes", "no"],
         default="yes",
         help="Enable/disable MAC address changing (default: yes)",
     )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        dest="loglevel",
-        help="set loglevel to INFO",
-        action="store_const",
-        const=logging.INFO,
-    )
-    parser.add_argument(
-        "-vv",
-        "--very-verbose",
-        dest="loglevel",
-        help="set loglevel to DEBUG",
-        action="store_const",
-        const=logging.DEBUG,
-    )
-    parser.add_argument(
+    up_parser.add_argument(
         "--dns",
         choices=["quad9", "cloudflare"],
         default="quad9",
         help="Choose DNS provider for encrypted DNS (default: quad9)"
     )
+
+    # Down command
+    down_parser = subparsers.add_parser('down', help='Bring down the secure connection')
+
+    # ... keep existing version and verbosity arguments ...
     return parser.parse_args(args)
 
 
@@ -113,117 +101,149 @@ def setup_logging(loglevel):
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+def cleanup_connection(interface):
+    """Clean up the secure connection"""
+    # Get permanent MAC address
+    try:
+        result = subprocess.run(['ethtool', '-P', interface], capture_output=True, text=True)
+        perm_mac = result.stdout.strip().split()[-1]
+        change_mac_linux(interface, perm_mac)
+        print(f"[+] MAC address restored to permanent address: {perm_mac}")
+    except Exception as e:
+        print(f"[-] Failed to restore MAC address: {e}")
+
+    # Remove WireGuard interface
+    try:
+        subprocess.run(['sudo', 'ip', 'link', 'delete', 'wg0'], check=True)
+        print("[+] WireGuard interface removed")
+    except subprocess.CalledProcessError:
+        print("[-] Failed to remove WireGuard interface")
+
+    # Reset routing
+    try:
+        subprocess.run(['sudo', 'ip', 'route', 'flush', 'table', '200'], check=True)
+        print("[+] Custom routing rules removed")
+    except subprocess.CalledProcessError:
+        print("[-] Failed to remove custom routing rules")
+
 def main(args):
     args = parse_args(args)
     setup_logging(args.loglevel)
 
-    print(f"Using VPN config: {args.vpn_config}")
-    print(f"Using SOCKS config: {args.socks_config}")
-    if am_i_online():
-        print("[+] System is online")
-    else:
-        print("[-] System is not online")
-        return
-    if args.change_mac == "yes":
+    if args.command == 'down':
         interface = get_primary_network_interface()
-        if not interface:
-            print("[-] Could not detect primary network interface")
+        if interface:
+            cleanup_connection(interface)
+        return
+
+    elif args.command == 'up':
+        print(f"Using VPN config: {args.vpn_config}")
+        print(f"Using SOCKS config: {args.socks_config}")
+        if am_i_online():
+            print("[+] System is online")
+        else:
+            print("[-] System is not online")
+            return
+        if args.change_mac == "yes":
+            interface = get_primary_network_interface()
+            if not interface:
+                print("[-] Could not detect primary network interface")
+                return
+
+            print(f"[+] Detected primary interface: {interface}")
+            current_mac = get_current_mac(interface)
+            print(f"[+] Current MAC: {current_mac}")
+            new_mac = get_random_mac()
+            change_mac_linux(interface, new_mac)
+            current_mac = get_current_mac(interface)
+            if current_mac == new_mac:
+                print(f"[+] MAC address was successfully changed to: {current_mac}")
+            else:
+                print("[-] MAC address did not get changed.")
+        else:
+            print("[*] MAC address changing is disabled")
+
+        # Setup encrypted DNS
+        if not setup_encrypted_dns(args.dns):
+            print("[-] Failed to setup encrypted DNS")
             return
 
-        print(f"[+] Detected primary interface: {interface}")
-        current_mac = get_current_mac(interface)
-        print(f"[+] Current MAC: {current_mac}")
-        new_mac = get_random_mac()
-        change_mac_linux(interface, new_mac)
-        current_mac = get_current_mac(interface)
-        if current_mac == new_mac:
-            print(f"[+] MAC address was successfully changed to: {current_mac}")
-        else:
-            print("[-] MAC address did not get changed.")
-    else:
-        print("[*] MAC address changing is disabled")
+        # Read SOCKS configuration
+        socks_config = parse_socks_config(args.socks_config)
 
-    # Setup encrypted DNS
-    if not setup_encrypted_dns(args.dns):
-        print("[-] Failed to setup encrypted DNS")
-        return
-
-    # Read SOCKS configuration
-    socks_config = parse_socks_config(args.socks_config)
-
-    with requests.Session() as session:
-        sock = socks.socksocket()
-        proxy_type = getattr(socks, socks_config["type"])
-        sock.setproxy(
-            proxy_type,
-            socks_config["host"],
-            socks_config["port"],
-            True,
-            socks_config["username"],
-            socks_config["password"],
-        )
-        session.mount("http://", TunneledHTTPAdapter(sock))
-        session.mount("https://", TunneledHTTPAdapter(sock))
-        # Get the IP address when using SOCKS proxy
-        socks_ip = session.get('https://httpbin.org/ip').json()['origin']
-        
-        # Get IP of primary interface
-        interface_ip = requests.get('https://httpbin.org/ip').json()['origin']
-        
-        if socks_ip == interface_ip:
-            raise RuntimeError(f"SOCKS proxy is not working - traffic is going through primary interface (IP: {interface_ip})")
-            
-        print(f"[+]SOCKS proxy connected to server at: {socks_ip}")
-
-        config_data = parse_wireguard_conf(args.vpn_config)
-        (
-            interface_private_key,
-            interface_address,
-            peer_public_key,
-            peer_allowed_ips,
-            peer_endpoint,
-        ) = unpack_wireguard_config(config_data)
-        client_name = "wg0"
-        local_ip = interface_address.split("/")[0]
-        try:
-            client_private_key = Key(interface_private_key)
-            peer_public_key = Key(peer_public_key)
-
-            client = Client(client_name, client_private_key, local_ip)
-
-            endpoint = peer_endpoint.split(":")[0]
-            port = int(peer_endpoint.split(":")[1])
-
-            server_conn = ServerConnection(
-                peer_public_key,
-                endpoint,
-                port,
+        with requests.Session() as session:
+            sock = socks.socksocket()
+            proxy_type = getattr(socks, socks_config["type"])
+            sock.setproxy(
+                proxy_type,
+                socks_config["host"],
+                socks_config["port"],
+                True,
+                socks_config["username"],
+                socks_config["password"],
             )
+            session.mount("http://", TunneledHTTPAdapter(sock))
+            session.mount("https://", TunneledHTTPAdapter(sock))
+            # Get the IP address when using SOCKS proxy
+            socks_ip = session.get('https://httpbin.org/ip').json()['origin']
+            
+            # Get IP of primary interface
+            interface_ip = requests.get('https://httpbin.org/ip').json()['origin']
+            
+            if socks_ip == interface_ip:
+                raise RuntimeError(f"SOCKS proxy is not working - traffic is going through primary interface (IP: {interface_ip})")
+                
+            print(f"[+] SOCKS proxy connected to server at: {socks_ip}")
 
-            client.set_server(server_conn)
-            client.connect()
+            config_data = parse_wireguard_conf(args.vpn_config)
+            (
+                interface_private_key,
+                interface_address,
+                peer_public_key,
+                peer_allowed_ips,
+                peer_endpoint,
+            ) = unpack_wireguard_config(config_data)
+            client_name = "wg0"
+            local_ip = interface_address.split("/")[0]
+            try:
+                client_private_key = Key(interface_private_key)
+                peer_public_key = Key(peer_public_key)
 
-            print("[+]WireGuard client connected successfully.")
+                client = Client(client_name, client_private_key, local_ip)
 
-            # Check if WireGuard is installed and load the module
-            if check_wireguard_installed():
-                load_wireguard_module()
+                endpoint = peer_endpoint.split(":")[0]
+                port = int(peer_endpoint.split(":")[1])
 
-                # Setup wg0 interface
-                setup_wireguard_interface()
-                print("[+] Wireguard interface set up successfully")
+                server_conn = ServerConnection(
+                    peer_public_key,
+                    endpoint,
+                    port,
+                )
 
-                # Route SSH traffic via primary network interface
-                route_ssh_via_primary_network_interface(interface)
-                print("[+] SSH traffic is being routed via primary network interface.")
+                client.set_server(server_conn)
+                client.connect()
 
-            else:
-                print("[-] Please install WireGuard to proceed.")
+                print("[+] WireGuard client connected successfully.")
 
-        except ValueError as e:
-            print(f"Error: {e}")
-        except Exception as e:
-            print(f"Unexpected error: {e}")
+                # Check if WireGuard is installed and load the module
+                if check_wireguard_installed():
+                    load_wireguard_module()
+
+                    # Setup wg0 interface
+                    setup_wireguard_interface()
+                    print("[+] Wireguard interface set up successfully")
+
+                    # Route SSH traffic via primary network interface
+                    route_ssh_via_primary_network_interface(interface)
+                    print("[+] SSH traffic is being routed via primary network interface.")
+
+                else:
+                    print("[-] Please install WireGuard to proceed.")
+
+            except ValueError as e:
+                print(f"Error: {e}")
+            except Exception as e:
+                print(f"Unexpected error: {e}")
 
 
 def run():
