@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=42", "wheel", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -19,7 +19,8 @@ dependencies = [
 security-ghost = "security_ghost.skeleton:run"
 
 [tool.setuptools]
-packages = ["security_ghost"]
+package-dir = {"security_ghost" = "security_ghost/src/security_ghost", "lib" = "security_ghost/src/lib"}
+packages = ["security_ghost", "lib"]
 
 [tool.setuptools.package-data]
 security_ghost = ["mac-vendor.txt"]

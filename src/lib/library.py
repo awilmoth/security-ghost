@@ -449,3 +449,40 @@ def setup_encrypted_dns(dns_provider="quad9"):
     except Exception as e:
         print(f"[-] Failed to setup encrypted DNS: {e}")
         return False
+
+
+def cleanup_connection(interface):
+    """Clean up the secure connection"""
+    # Get permanent MAC address
+    try:
+        result = subprocess.run(['ethtool', '-P', interface], capture_output=True, text=True)
+        perm_mac = result.stdout.strip().split()[-1]
+        change_mac_linux(interface, perm_mac)
+        print(f"[+] MAC address restored to permanent address: {perm_mac}")
+    except Exception as e:
+        print(f"[-] Failed to restore MAC address: {e}")
+
+    # Remove WireGuard interface
+    try:
+        subprocess.run(['sudo', 'ip', 'link', 'delete', 'wg0'], check=False)
+        print("[+] WireGuard interface removed")
+    except subprocess.CalledProcessError:
+        print("[-] Failed to remove WireGuard interface")
+
+    # Reset routing rules
+    cleanup_commands = [
+        "sudo ip rule del table 51820 2>/dev/null || true",
+        "sudo ip rule del table 100 2>/dev/null || true",
+        "sudo ip route flush table 51820 2>/dev/null || true",
+        "sudo ip route flush table 100 2>/dev/null || true",
+        "sudo iptables -t mangle -D OUTPUT -p tcp --sport 22 -j MARK --set-mark 0x1 2>/dev/null || true",
+        "sudo iptables -t mangle -D OUTPUT -p tcp --dport 22 -j MARK --set-mark 0x1 2>/dev/null || true"
+    ]
+
+    for cmd in cleanup_commands:
+        try:
+            subprocess.run(cmd, shell=True, check=False)
+        except subprocess.CalledProcessError:
+            pass
+
+    print("[+] Routing rules cleaned up")
