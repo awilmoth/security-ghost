@@ -397,13 +397,7 @@ def get_primary_network_interface():
 
 def setup_encrypted_dns(dns_provider="quad9"):
     """
-    Setup encrypted DNS proxy using either Quad9 or Cloudflare.
-    
-    Parameters:
-    dns_provider (str): The DNS provider to use ('quad9' or 'cloudflare'). Defaults to 'quad9'.
-    
-    Returns:
-    bool: True if setup successful, False otherwise
+    Setup encrypted DNS using DNS-over-TLS with either Quad9 or Cloudflare.
     """
     dns_configs = {
         "quad9": {
@@ -425,55 +419,83 @@ def setup_encrypted_dns(dns_provider="quad9"):
     config = dns_configs[dns_provider.lower()]
     
     try:
-        # Setup DNS-over-TLS using systemd-resolved
+        # Backup original resolv.conf
+        subprocess.run("sudo cp /etc/resolv.conf /etc/resolv.conf.backup", shell=True, check=True)
+        
+        # Configure main resolved.conf first
+        main_resolved_conf = f"""[Resolve]
+DNS={config['ip']}
+FallbackDNS=1.1.1.1
+DNSOverTLS=yes
+DNSSEC=yes
+Cache=yes
+DNSStubListener=yes"""
+
+        # Write main configuration
+        with open('/tmp/resolved.conf', 'w') as f:
+            f.write(main_resolved_conf)
+        
+        # Configure additional settings
+        additional_conf = f"""[Resolve]
+DNS={config['ip']}:{config['port']}
+DNSOverTLS=yes
+DNSSEC=yes
+Domains=~."""
+
+        # Write additional configuration
+        with open('/tmp/encrypted-dns.conf', 'w') as f:
+            f.write(additional_conf)
+        
         commands = [
-            f"sudo mkdir -p /etc/systemd/resolved.conf.d/",
-            f"sudo bash -c 'cat > /etc/systemd/resolved.conf.d/encrypted-dns.conf << EOL\n"
-            f"[Resolve]\n"
-            f"DNS={config['ip']}\n"
-            f"DNSOverTLS=yes\n"
-            f"DNSSEC=yes\n"
-            f"Domains=~.\n"
-            f"EOL'",
-            "sudo systemctl restart systemd-resolved"
+            "sudo mv /tmp/resolved.conf /etc/systemd/resolved.conf",
+            "sudo mkdir -p /etc/systemd/resolved.conf.d/",
+            "sudo mv /tmp/encrypted-dns.conf /etc/systemd/resolved.conf.d/encrypted-dns.conf",
+            "sudo chmod 644 /etc/systemd/resolved.conf",
+            "sudo chmod 644 /etc/systemd/resolved.conf.d/encrypted-dns.conf",
+            "sudo systemctl daemon-reload",
+            "sudo systemctl restart systemd-resolved",
+            "sudo rm -f /etc/resolv.conf",
+            "sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf"
         ]
         
         for command in commands:
-            run_shell_command(command)
+            subprocess.run(command, shell=True, check=True)
             
-        print(f"[+] Encrypted DNS setup complete using {dns_provider}")
-        print(f"[+] DNS Server: {config['ip']}")
-        print(f"[+] Hostname: {config['hostname']}")
-        return True
+        subprocess.run("sleep 2", shell=True)
+            
+        # Verify DNS-over-TLS is active
+        resolved_status = subprocess.run(
+            "resolvectl status | grep -E 'DNS Server|DNSSEC|DNS over TLS'",
+            shell=True, capture_output=True, text=True
+        )
         
-    except Exception as e:
+        if (config['ip'] in resolved_status.stdout and 
+            "yes" in resolved_status.stdout.lower()):
+            print(f"[+] Encrypted DNS setup complete using {dns_provider}")
+            print(f"[+] DNS Server: {config['ip']}")
+            return True
+        else:
+            print("[-] DNS-over-TLS configuration not active")
+            return False
+        
+    except subprocess.CalledProcessError as e:
         print(f"[-] Failed to setup encrypted DNS: {e}")
+        return False
+    except Exception as e:
+        print(f"[-] Unexpected error during DNS setup: {e}")
         return False
 
 
 def cleanup_connection(interface):
     """Clean up the secure connection"""
-    print("\n[DEBUG] Starting cleanup...")
-    print(f"[DEBUG] Interface: {interface}")
-    
-    # Print current routing rules
-    print("\n[DEBUG] Current routing rules:")
-    subprocess.run("sudo ip rule show", shell=True)
-    
     # Get permanent MAC address
     try:
         result = subprocess.run(['ethtool', '-P', interface], capture_output=True, text=True)
         perm_mac = result.stdout.strip().split()[-1]
-        print(f"[DEBUG] Found permanent MAC: {perm_mac}")
         change_mac_linux(interface, perm_mac)
         print(f"[+] MAC address restored to permanent address: {perm_mac}")
     except Exception as e:
         print(f"[-] Failed to restore MAC address: {e}")
-
-    print("\n[DEBUG] Checking for WireGuard interface...")
-    # Check if WireGuard interface exists
-    wg_check = subprocess.run(['ip', 'link', 'show', 'wg0'], capture_output=True, text=True)
-    print(f"[DEBUG] WireGuard check result: {wg_check.stdout}")
 
     # Remove WireGuard interface (if it exists)
     try:
@@ -481,8 +503,6 @@ def cleanup_connection(interface):
         print("[+] WireGuard interface removed")
     except subprocess.CalledProcessError:
         print("[-] No WireGuard interface to remove")
-
-    print("\n[DEBUG] Starting routing rules cleanup...")
     
     # Clean up routing rules using shell commands
     cleanup_commands = [
@@ -490,36 +510,28 @@ def cleanup_connection(interface):
         "sudo ip rule show | grep -v 'lookup local\\|lookup main\\|lookup default' | cut -d ':' -f 1 | xargs -r -L 1 sudo ip rule del prio",
         # Remove iptables rules
         "sudo iptables -t mangle -F",  # Flush mangle table
-        "sudo iptables -t mangle -X"   # Delete custom chains in mangle table
+        "sudo iptables -t mangle -X",   # Delete custom chains in mangle table
+        # Restore DNS settings
+        "sudo rm -f /etc/systemd/resolved.conf.d/encrypted-dns.conf",
+        "sudo systemctl restart systemd-resolved",
+        # Restore default resolv.conf if it was backed up
+        "sudo cp /etc/resolv.conf.backup /etc/resolv.conf 2>/dev/null || true"
     ]
 
     for cmd in cleanup_commands:
         try:
-            print(f"\n[DEBUG] Running command: {cmd}")
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            print(f"[DEBUG] Command output: {result.stdout}")
-            print(f"[DEBUG] Command error: {result.stderr}")
+            subprocess.run(cmd, shell=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            print(f"[DEBUG] Command failed with error: {e}")
-
-    print("\n[DEBUG] Checking remaining routing rules:")
-    subprocess.run("sudo ip rule show", shell=True)
-
-    print("\n[DEBUG] Checking iptables mangle table:")
-    subprocess.run("sudo iptables -t mangle -L", shell=True)
+            print(f"[-] Failed to clean up routing rules: {e}")
 
     # Restore default route if needed
     try:
-        print("\n[DEBUG] Restarting networking...")
         subprocess.run(['sudo', 'systemctl', 'restart', 'systemd-networkd'], check=False)
         print("[+] Network service restarted")
+        # Ensure DNS is working
+        subprocess.run(['sudo', 'systemctl', 'restart', 'systemd-resolved'], check=False)
+        print("[+] DNS service restarted")
     except subprocess.CalledProcessError:
-        print("[-] Failed to restart network service")
+        print("[-] Failed to restart network services")
 
-    print("\n[DEBUG] Final routing rules:")
-    subprocess.run("sudo ip rule show", shell=True)
-    
-    print("\n[DEBUG] Final routing table:")
-    subprocess.run("sudo ip route show", shell=True)
-
-    print("\n[+] Network cleanup completed")
+    print("[+] Network cleanup completed")
