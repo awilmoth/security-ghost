@@ -5,7 +5,10 @@ from lib.library import (
     check_dante_installed,
     load_wireguard_module,
     setup_wireguard_server,
-    setup_dante_proxy
+    setup_dante_proxy,
+    generate_wireguard_config,
+    generate_dante_config,
+    combine_configs
 )
 
 def setup_dnsmasq():

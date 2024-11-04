@@ -3,11 +3,10 @@ import logging
 import sys
 import requests
 import socks
-from python_wireguard import Key, Client, ServerConnection
 from lib.library import (
     am_i_online,
     get_current_mac,
-    change_mac_linux,
+    change_mac,
     get_random_mac,
     get_primary_network_interface,
     setup_wireguard_interface,
@@ -17,9 +16,6 @@ from lib.library import (
     check_wireguard_installed,
     load_wireguard_module,
     parse_socks_config,
-    get_current_mac,
-    change_mac_linux,
-    setup_encrypted_dns,
     TunneledHTTPAdapter,
     cleanup_connection,
 )
@@ -35,6 +31,20 @@ __copyright__ = "Aaron Wilmoth"
 __license__ = "MIT"
 
 _logger = logging.getLogger(__name__)
+
+# Conditionally import python_wireguard only on Ubuntu
+if sys.platform != "darwin":  # Ubuntu/Linux
+    try:
+        from python_wireguard import Key, Client, ServerConnection
+        HAS_WIREGUARD_LIB = True
+    except (OSError, ImportError) as e:
+        print(f"[-] Warning: python_wireguard library not available, falling back to CLI tools: {e}")
+        HAS_WIREGUARD_LIB = False
+else:  # macOS
+    print("[*] Running on macOS - python_wireguard library not supported")
+    HAS_WIREGUARD_LIB = False
+    # Define dummy classes to prevent NameError
+    Key = Client = ServerConnection = None
 
 
 def parse_args(args):
@@ -73,12 +83,6 @@ def parse_args(args):
         choices=["yes", "no"],
         default="yes",
         help="Enable/disable MAC address changing (default: yes)",
-    )
-    up_parser.add_argument(
-        "--dns",
-        choices=["quad9", "cloudflare"],
-        default="cloudflare",
-        help="Choose DNS provider for encrypted DNS (default: cloudflare)"
     )
 
     # Down command
@@ -125,6 +129,7 @@ def setup_logging(loglevel):
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+
 def main(args):
     args = parse_args(args)
     setup_logging(args.loglevel)
@@ -152,37 +157,37 @@ def main(args):
             print(f"[+] Detected primary interface: {interface}")
             current_mac = get_current_mac(interface)
             print(f"[+] Current MAC: {current_mac}")
-            new_mac = get_random_mac()
-            change_mac_linux(interface, new_mac)
-            current_mac = get_current_mac(interface)
-            if current_mac == new_mac:
-                print(f"[+] MAC address was successfully changed to: {current_mac}")
+            
+            if sys.platform == "darwin":
+                print("[!] Skipping MAC address change on macOS.")
             else:
-                print("[-] MAC address did not get changed.")
+                new_mac = get_random_mac()
+                result = change_mac(interface, new_mac)
+                current_mac = get_current_mac(interface)
+                if current_mac == new_mac:
+                    print(f"[+] MAC address was successfully changed to: {current_mac}")
+                else:
+                    print("[-] MAC address did not get changed.")
         else:
             print("[*] MAC address changing is disabled")
-
-        # Setup encrypted DNS
-        if not setup_encrypted_dns(args.dns):
-            print("[-] Failed to setup encrypted DNS")
-            return
 
         # Read SOCKS configuration
         socks_config = parse_socks_config(args.socks_config)
 
         with requests.Session() as session:
-            sock = socks.socksocket()
-            proxy_type = getattr(socks, socks_config["type"])
-            sock.setproxy(
-                proxy_type,
-                socks_config["host"],
-                socks_config["port"],
-                True,
-                socks_config["username"],
-                socks_config["password"],
-            )
-            session.mount("http://", TunneledHTTPAdapter(sock))
-            session.mount("https://", TunneledHTTPAdapter(sock))
+            session.proxies = {
+                'http': f"socks5h://{socks_config['username']}:{socks_config['password']}@{socks_config['host']}:{socks_config['port']}",
+                'https': f"socks5h://{socks_config['username']}:{socks_config['password']}@{socks_config['host']}:{socks_config['port']}"
+            }
+
+            response = session.get('https://httpbin.org/ip')
+
+            try:
+                socks_ip = response.json()['origin']
+            except (ValueError, KeyError) as e:
+                print(f"[-] Failed to get IP address: {e}")
+                print(f"[-] Raw response: {response.text}")
+                sys.exit(1)
             # Get the IP address when using SOCKS proxy
             socks_ip = session.get('https://httpbin.org/ip').json()['origin']
             
@@ -205,44 +210,66 @@ def main(args):
             client_name = "wg0"
             local_ip = interface_address.split("/")[0]
             try:
-                client_private_key = Key(interface_private_key)
-                peer_public_key = Key(peer_public_key)
+                if HAS_WIREGUARD_LIB:
+                    # Existing WireGuard setup code for Linux
+                    client_private_key = Key(interface_private_key)
+                    peer_public_key = Key(peer_public_key)
 
-                client = Client(client_name, client_private_key, local_ip)
+                    client = Client(client_name, client_private_key, local_ip)
 
-                endpoint = peer_endpoint.split(":")[0]
-                port = int(peer_endpoint.split(":")[1])
+                    endpoint = peer_endpoint.split(":")[0]
+                    port = int(peer_endpoint.split(":")[1])
 
-                server_conn = ServerConnection(
-                    peer_public_key,
-                    endpoint,
-                    port,
-                )
+                    server_conn = ServerConnection(
+                        peer_public_key,
+                        endpoint,
+                        port,
+                    )
 
-                client.set_server(server_conn)
-                client.connect()
+                    client.set_server(server_conn)
+                    client.connect()
 
-                print("[+] WireGuard client connected successfully.")
+                    print("[+] WireGuard client connected successfully.")
 
-                # Check if WireGuard is installed and load the module
-                if check_wireguard_installed():
-                    load_wireguard_module()
+                    # Check if WireGuard is installed and load the module
+                    if check_wireguard_installed():
+                        load_wireguard_module()
 
-                    # Setup wg0 interface
-                    setup_wireguard_interface()
-                    print("[+] Wireguard interface set up successfully")
+                        # Setup wg0 interface
+                        setup_wireguard_interface()
+                        print("[+] Wireguard interface set up successfully")
 
-                    # Route SSH traffic via primary network interface
-                    route_ssh_via_primary_network_interface(interface)
-                    print("[+] SSH traffic is being routed via primary network interface.")
+                        # Route SSH traffic via primary network interface
+                        route_ssh_via_primary_network_interface(interface)
+                        print("[+] SSH traffic is being routed via primary network interface.")
 
+                    else:
+                        print("[-] Please install WireGuard to proceed.")
                 else:
-                    print("[-] Please install WireGuard to proceed.")
+                    # CLI-based WireGuard setup for macOS
+                    print("[*] Using WireGuard CLI tools")
+                    try:
+                        # Write the config to a temporary file with secure permissions
+                        config_path = "/tmp/temp_wg0.conf"
+                        
+                        # Create file with restricted permissions from the start
+                        with os.fdopen(os.open(config_path, os.O_WRONLY | os.O_CREAT, 0o600), 'w') as dst:
+                            with open(args.vpn_config, 'r') as src:
+                                dst.write(src.read())
+                        
+                        # Use wg-quick to set up the connection
+                        subprocess.run(["sudo", "wg-quick", "up", config_path], check=True)
+                        print("[+] WireGuard connection established via CLI")
+                    except subprocess.CalledProcessError as e:
+                        print(f"[-] Failed to establish WireGuard connection: {e}")
+                        return
+                    except Exception as e:
+                        print(f"[-] Unexpected error setting up WireGuard: {e}")
+                        return
 
-            except ValueError as e:
-                print(f"Error: {e}")
             except Exception as e:
                 print(f"Unexpected error: {e}")
+                return  # Add return to prevent further execution after error
 
 
 def run():
