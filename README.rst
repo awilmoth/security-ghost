@@ -1,8 +1,3 @@
-==============
-security_ghost
-==============
-
-
 # Security Ghost Features
 
 ## Overview
