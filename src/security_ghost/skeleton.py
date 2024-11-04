@@ -18,6 +18,7 @@ from lib.library import (
     parse_socks_config,
     TunneledHTTPAdapter,
     cleanup_connection,
+    HAS_WIREGUARD_LIB,
 )
 from security_ghost import __version__
 from requests.adapters import HTTPAdapter
@@ -31,20 +32,6 @@ __copyright__ = "Aaron Wilmoth"
 __license__ = "MIT"
 
 _logger = logging.getLogger(__name__)
-
-# Conditionally import python_wireguard only on Ubuntu
-if sys.platform != "darwin":  # Ubuntu/Linux
-    try:
-        from python_wireguard import Key, Client, ServerConnection
-        HAS_WIREGUARD_LIB = True
-    except (OSError, ImportError) as e:
-        print(f"[-] Warning: python_wireguard library not available, falling back to CLI tools: {e}")
-        HAS_WIREGUARD_LIB = False
-else:  # macOS
-    print("[*] Running on macOS - python_wireguard library not supported")
-    HAS_WIREGUARD_LIB = False
-    # Define dummy classes to prevent NameError
-    Key = Client = ServerConnection = None
 
 
 def parse_args(args):
